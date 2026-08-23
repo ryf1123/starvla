@@ -26,9 +26,8 @@ def load_policy(run, device):
     ck = torch.load(f"{run}/latest.pt", map_location=device, weights_only=False)
     cfg = ck["cfg"]
     vocab = CharVocab.load(ck["vocab"])
-    model = VLAPolicy(vocab=len(vocab), horizon=cfg["model"]["horizon"],
-                      lang_mode=cfg["model"]["lang_mode"], film=cfg["model"]["film"],
-                      cams=tuple(cfg["model"]["cams"]))
+    from policy.train import model_kwargs
+    model = VLAPolicy(vocab=len(vocab), **model_kwargs(cfg))
     model.load_state_dict(ck["model"])
     model.to(device).eval()
     smean, sstd = ck["state_stats"]

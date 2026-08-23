@@ -25,6 +25,17 @@ SUITES = {
         ("cam_front", ["model.cams=[front]"], "只有前视：最后 2 cm 看不清"),
         ("cam_wrist", ["model.cams=[wrist]"], "只有腕视：看不到全局，不知道盘子在哪"),
     ],
+    "heads": [
+        ("head_regress", ["model.head=regress"], "连续回归 + L1（ACT 路线，默认）"),
+        ("head_discrete", ["model.head=discrete"], "每维 41 个格子 + 交叉熵（RT-1 路线）"),
+        ("head_diffusion", ["model.head=diffusion"], "10 步 DDIM 去噪（Diffusion Policy 路线）"),
+    ],
+    "data": [
+        ("data_075", ["data.limit=75"], "75 条演示"),
+        ("data_150", ["data.limit=150"], "150 条"),
+        ("data_300", ["data.limit=300"], "300 条"),
+        ("data_600", ["data.limit=600"], "600 条（全部）"),
+    ],
     "chunk": [
         ("chunk1", ["model.horizon=1"], "不分块：逐步预测，复合误差最大"),
         ("chunk4", ["model.horizon=4"], ""),

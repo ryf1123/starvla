@@ -33,8 +33,20 @@ def deep_set(d, dotted, value):
     d[keys[-1]] = value
 
 
+def model_kwargs(cfg):
+    """从 config 里取模型超参，带默认值——老的 config.yaml 里没有 head 之类的键。"""
+    m = cfg["model"]
+    return dict(horizon=m["horizon"], lang_mode=m["lang_mode"], film=m["film"],
+                cams=tuple(m["cams"]), head=m.get("head", "regress"),
+                n_bins=m.get("n_bins", 41), diff_steps=m.get("diff_steps", 100),
+                diff_infer_steps=m.get("diff_infer_steps", 10))
+
+
 def build(cfg, eps=None):
     eps = eps if eps is not None else load_episodes(cfg["data"]["path"])
+    limit = cfg["data"].get("limit")
+    if limit:                      # 数据量曲线：固定随机种子取前 N 条，保证是子集关系
+        eps = [eps[i] for i in np.random.default_rng(0).permutation(len(eps))[:int(limit)]]
     vocab = CharVocab([e["instruction"] for e in eps])
     n_val = max(1, int(len(eps) * cfg["data"]["val_frac"]))
     rng = np.random.default_rng(0)
@@ -45,9 +57,7 @@ def build(cfg, eps=None):
                      shift_aug=cfg["data"]["shift_aug"])
     va = DemoDataset(val_eps, vocab, cfg["model"]["horizon"],
                      state_stats=(tr.smean, tr.sstd), train=False)
-    model = VLAPolicy(vocab=len(vocab), horizon=cfg["model"]["horizon"],
-                      lang_mode=cfg["model"]["lang_mode"], film=cfg["model"]["film"],
-                      cams=tuple(cfg["model"]["cams"]))
+    model = VLAPolicy(vocab=len(vocab), **model_kwargs(cfg))
     return tr, va, model, vocab
 
 

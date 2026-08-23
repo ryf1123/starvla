@@ -2,10 +2,15 @@ data:
   path: data/demos/place2p
   val_frac: 0.1
   shift_aug: 4
+  limit: null          # 只用前 N 条演示（数据量曲线用）
 model:
   horizon: 8
   lang_mode: seq       # seq / bow / none
   film: true
+  head: regress        # regress / discrete / diffusion
+  n_bins: 41           # discrete 头每个维度的格子数
+  diff_steps: 100      # diffusion 头训练用的噪声步数
+  diff_infer_steps: 10 # 推理时 DDIM 步数
   cams: [front, wrist]
 train:
   steps: 12000

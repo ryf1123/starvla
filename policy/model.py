@@ -116,37 +116,133 @@ class LanguageEncoder(nn.Module):
         return x.masked_fill(pad[..., None], 0).sum(1) / (~pad).sum(1, keepdim=True).clamp(min=1)
 
 
+def timestep_embedding(t, dim):
+    """扩散头用的正弦时间嵌入（和 Transformer 的位置编码同一个套路）。"""
+    half = dim // 2
+    freqs = torch.exp(-math.log(10000.0) * torch.arange(half, device=t.device) / half)
+    ang = t[:, None].float() * freqs[None]
+    return torch.cat([torch.cos(ang), torch.sin(ang)], dim=-1)
+
+
 class VLAPolicy(nn.Module):
+    """三种动作头共用同一套视觉/语言骨干，只换最后一步怎么表示动作：
+
+        regress    直接回归 (H,5)，L1 损失                     —— ACT
+        discrete   每个维度离散成 n_bins 个格子，交叉熵         —— RT-1 / RT-2 / OpenVLA
+        diffusion  从噪声去噪出整块动作，预测噪声，MSE          —— Diffusion Policy / π0
+
+    回归头的参数名和形状保持不变（self.head 仍是同一个 Sequential），
+    所以之前训的 checkpoint 还能加载。
+    """
+
     def __init__(self, vocab, horizon=8, act_dim=5, state_dim=7, lang_dim=128,
-                 hidden=512, lang_mode="seq", film=True, cams=("front", "wrist")):
+                 hidden=512, lang_mode="seq", film=True, cams=("front", "wrist"),
+                 head="regress", n_bins=41, diff_steps=100, diff_infer_steps=10):
         super().__init__()
         self.cams, self.H, self.act_dim = tuple(cams), horizon, act_dim
+        self.head_type, self.n_bins = head, n_bins
+        self.diff_steps, self.diff_infer_steps = diff_steps, diff_infer_steps
         self.lang = LanguageEncoder(vocab, lang_dim, mode=lang_mode)
         self.enc = nn.ModuleDict({c: VisionEncoder(lang_dim=lang_dim, film=film) for c in self.cams})
         vis_dim = sum(self.enc[c].out_dim for c in self.cams)
         self.state_mlp = nn.Sequential(nn.Linear(state_dim, 64), nn.ReLU(), nn.Linear(64, 64))
+        out_dim = {"regress": horizon * act_dim,
+                   "discrete": horizon * act_dim * n_bins,
+                   "diffusion": hidden}[head]
         self.head = nn.Sequential(
             nn.Linear(vis_dim + 64 + lang_dim, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
-            nn.Linear(hidden, horizon * act_dim))
+            nn.Linear(hidden, out_dim))
+        if head == "diffusion":
+            self.t_mlp = nn.Sequential(nn.Linear(64, 128), nn.SiLU(), nn.Linear(128, 128))
+            self.denoiser = nn.Sequential(
+                nn.Linear(hidden + 128 + horizon * act_dim, hidden), nn.SiLU(),
+                nn.Linear(hidden, hidden), nn.SiLU(),
+                nn.Linear(hidden, horizon * act_dim))
+            # 余弦噪声表（Nichol & Dhariwal 2021），比线性表在少步数下更稳
+            t = torch.linspace(0, 1, diff_steps + 1)
+            ac = torch.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2
+            self.register_buffer("alpha_bar", (ac / ac[0]).clamp(1e-5, 1.0))
 
-    def forward(self, batch, return_heat=False):
+    def backbone(self, batch):
+        """视觉 + 语言 + 本体 → 一个条件向量（三种动作头共用）。"""
         z = self.lang(batch["tokens"])
         feats, heats = [], {}
         for c in self.cams:
             kp, heat = self.enc[c](batch[c], z)
             feats.append(kp)
             heats[c] = heat
-        h = torch.cat(feats + [self.state_mlp(batch["state"]), z], dim=-1)
-        a = self.head(h).reshape(-1, self.H, self.act_dim)
-        a = torch.cat([a[..., :4].tanh(), a[..., 4:]], dim=-1)   # 位移/偏航压到 [-1,1]，夹爪留给 BCE 之外的 L1
+        return torch.cat(feats + [self.state_mlp(batch["state"]), z], dim=-1), heats
+
+    def forward(self, batch, return_heat=False):
+        """推理：返回 (B,H,5) 的动作分块。"""
+        h, heats = self.backbone(batch)
+        if self.head_type == "regress":
+            a = self.head(h).reshape(-1, self.H, self.act_dim)
+            a = torch.cat([a[..., :4].tanh(), a[..., 4:]], dim=-1)
+        elif self.head_type == "discrete":
+            logits = self.head(h).reshape(-1, self.H, self.act_dim, self.n_bins)
+            a = self._bin_centers(logits.argmax(-1))
+        else:
+            a = self._ddim_sample(self.head(h))
         return (a, heats) if return_heat else a
 
+    # ------------------------------------------------------------ 离散 token 头
+    def _bin_centers(self, idx):
+        return idx.float() / (self.n_bins - 1) * 2 - 1
+
+    def _to_bins(self, a):
+        return ((a.clamp(-1, 1) + 1) / 2 * (self.n_bins - 1)).round().long()
+
+    # ------------------------------------------------------------ 扩散头
+    def _eps(self, cond, a_noisy, t):
+        te = self.t_mlp(timestep_embedding(t, 64))
+        x = torch.cat([cond, te, a_noisy.flatten(1)], dim=-1)
+        return self.denoiser(x).reshape(-1, self.H, self.act_dim)
+
+    @torch.no_grad()
+    def _ddim_sample(self, cond):
+        B = cond.shape[0]
+        a = torch.randn(B, self.H, self.act_dim, device=cond.device)
+        steps = torch.linspace(self.diff_steps, 0, self.diff_infer_steps + 1).long().to(cond.device)
+        for i in range(self.diff_infer_steps):
+            t, t_next = steps[i], steps[i + 1]
+            ab, ab_next = self.alpha_bar[t], self.alpha_bar[t_next]
+            eps = self._eps(cond, a, t.repeat(B))
+            a0 = ((a - (1 - ab).sqrt() * eps) / ab.sqrt()).clamp(-1, 1)
+            a = ab_next.sqrt() * a0 + (1 - ab_next).sqrt() * eps      # DDIM，确定性
+        return a
+
+    # ------------------------------------------------------------------ 损失
     def loss(self, batch):
-        pred = self(batch)
-        err = (pred - batch["action"]).abs().mean(-1) * batch["mask"]
-        l1 = err.sum() / batch["mask"].sum().clamp(min=1)
+        h, _ = self.backbone(batch)
+        mask, target = batch["mask"], batch["action"]
+        denom = mask.sum().clamp(min=1)
+
+        if self.head_type == "regress":
+            pred = self.head(h).reshape(-1, self.H, self.act_dim)
+            pred = torch.cat([pred[..., :4].tanh(), pred[..., 4:]], dim=-1)
+            loss = ((pred - target).abs().mean(-1) * mask).sum() / denom
+
+        elif self.head_type == "discrete":
+            logits = self.head(h).reshape(-1, self.H, self.act_dim, self.n_bins)
+            tgt = self._to_bins(target)
+            ce = F.cross_entropy(logits.reshape(-1, self.n_bins), tgt.reshape(-1),
+                                 reduction="none").reshape_as(tgt).mean(-1)
+            loss = (ce * mask).sum() / denom
+            pred = self._bin_centers(logits.argmax(-1))
+
+        else:
+            t = torch.randint(1, self.diff_steps + 1, (h.shape[0],), device=h.device)
+            ab = self.alpha_bar[t][:, None, None]
+            noise = torch.randn_like(target)
+            a_noisy = ab.sqrt() * target + (1 - ab).sqrt() * noise
+            eps = self._eps(self.head(h), a_noisy, t)
+            loss = (((eps - noise) ** 2).mean(-1) * mask).sum() / denom
+            with torch.no_grad():
+                pred = ((a_noisy - (1 - ab).sqrt() * eps) / ab.sqrt()).clamp(-1, 1)
+
         with torch.no_grad():
-            grip = (((pred[..., 4] > 0) == (batch["action"][..., 4] > 0)).float() * batch["mask"]
-                    ).sum() / batch["mask"].sum().clamp(min=1)
-        return l1, {"l1": l1.item(), "grip_acc": grip.item()}
+            l1 = ((pred - target).abs().mean(-1) * mask).sum() / denom
+            grip = (((pred[..., 4] > 0) == (target[..., 4] > 0)).float() * mask).sum() / denom
+        return loss, {"loss": loss.item(), "l1": l1.item(), "grip_acc": grip.item()}
