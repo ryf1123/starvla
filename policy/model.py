@@ -157,9 +157,18 @@ class LanguageEncoder(nn.Module):
     位置编码的梯度信号又太弱（std 只从 0.020 长到 0.023）。cls 模式是修复版。
     """
 
-    def __init__(self, vocab, dim=128, max_len=20, mode="seq"):
+    def __init__(self, vocab, dim=128, max_len=20, mode="seq", pre_dim=512):
         super().__init__()
         self.mode = mode
+        if mode in ("ppool", "ptok"):
+            # 预训练编码器是冻结的，只训一个投影（ppool）或投影 + 注意力池化（ptok）
+            self.pre_proj = nn.Linear(pre_dim, dim)
+            if mode == "ptok":
+                self.query = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
+                self.attn = nn.MultiheadAttention(dim, 4, batch_first=True)
+                self.ln = nn.LayerNorm(dim)
+            self.out_dim = dim
+            return
         self.emb = nn.Embedding(vocab, dim, padding_idx=0)
         pos_scale = 0.2 if mode == "cls" else 0.02
         self.pos = nn.Parameter(torch.randn(1, max_len + 1, dim) * pos_scale)
@@ -170,6 +179,15 @@ class LanguageEncoder(nn.Module):
         # 一到验证/闭环推理就崩。见 notes/02-bc-闭环.md
         self.tr = nn.TransformerEncoder(enc, 1, enable_nested_tensor=False)
         self.out_dim = dim
+
+    def forward_pre(self, feats, mask):
+        """feats (B,L,D_pre) 来自冻结的预训练编码器；mask True = padding。"""
+        x = self.pre_proj(feats)
+        if self.mode == "ppool":
+            return x[:, 0]                                   # CLS
+        q = self.query.expand(x.shape[0], -1, -1)
+        out, _ = self.attn(q, x, x, key_padding_mask=mask)   # 可学的注意力池化
+        return self.ln(out[:, 0])
 
     def forward(self, tokens):
         if self.mode == "none":
@@ -211,12 +229,12 @@ class VLAPolicy(nn.Module):
                  hidden=512, lang_mode="seq", film=True, cams=("front", "wrist"),
                  head="regress", n_bins=41, diff_steps=100, diff_infer_steps=10,
                  ss_raw=True, last_stride=1, backbone="cnn", pretrained=True,
-                 freeze_backbone=False, aux_weight=0.0):
+                 freeze_backbone=False, aux_weight=0.0, pre_dim=512):
         super().__init__()
         self.cams, self.H, self.act_dim = tuple(cams), horizon, act_dim
         self.head_type, self.n_bins = head, n_bins
         self.diff_steps, self.diff_infer_steps = diff_steps, diff_infer_steps
-        self.lang = LanguageEncoder(vocab, lang_dim, mode=lang_mode)
+        self.lang = LanguageEncoder(vocab, lang_dim, mode=lang_mode, pre_dim=pre_dim)
         def make_enc():
             if backbone == "resnet18":
                 return ResNetEncoder(lang_dim=lang_dim, film=film, pretrained=pretrained,
@@ -253,7 +271,8 @@ class VLAPolicy(nn.Module):
 
     def backbone(self, batch):
         """视觉 + 语言 + 本体 → 一个条件向量（三种动作头共用）。"""
-        z = self.lang(batch["tokens"])
+        z = (self.lang.forward_pre(batch["lang_feat"], batch["lang_mask"])
+             if self.lang.mode in ("ppool", "ptok") else self.lang(batch["tokens"]))
         feats, heats = [], {}
         for c in self.cams:
             kp, heat = self.enc[c](batch[c], z)
@@ -311,7 +330,8 @@ class VLAPolicy(nn.Module):
         kp_std   同一个关键点在一个 batch 的不同场景之间的标准差（图像归一化到 [-1,1]）。
                  小于 0.1 基本等于"不管看到什么都输出同一个位置"。
         """
-        z = self.lang(batch["tokens"])
+        z = (self.lang.forward_pre(batch["lang_feat"], batch["lang_mask"])
+             if self.lang.mode in ("ppool", "ptok") else self.lang(batch["tokens"]))
         out = {}
         for c in self.cams:
             kp, heat = self.enc[c](batch[c], z)

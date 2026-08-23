@@ -44,11 +44,20 @@ class Runner:
 
     def reset(self, instruction):
         self.tok = torch.from_numpy(self.vocab.encode(instruction))[None].to(self.dev)
+        if self.model.lang.mode in ("ppool", "ptok"):
+            # 现编现用：这样才能测"训练里没出现过的说法"
+            if not hasattr(self, "_pre"):
+                from policy.text_encoder import PretrainedText
+                self._pre = PretrainedText()
+            f, m = self._pre.encode([instruction])
+            self.lang_feat, self.lang_mask = f.to(self.dev), m.to(self.dev)
         self.buf = []          # 每项 (剩余的预测序列, 生成时的年龄)
 
     @torch.no_grad()
     def act(self, obs):
         b = {"tokens": self.tok,
+             **({"lang_feat": self.lang_feat, "lang_mask": self.lang_mask}
+                if self.model.lang.mode in ("ppool", "ptok") else {}),
              "state": torch.from_numpy(((obs["state"] - self.smean) / self.sstd).astype(np.float32))[None].to(self.dev)}
         for c in self.model.cams:
             b[c] = torch.from_numpy(obs[c].transpose(2, 0, 1).copy())[None].to(self.dev)

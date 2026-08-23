@@ -66,8 +66,10 @@ def load_episodes(path):
 
 
 class DemoDataset(Dataset):
-    def __init__(self, eps, vocab, horizon=8, state_stats=None, shift_aug=4, train=True):
+    def __init__(self, eps, vocab, horizon=8, state_stats=None, shift_aug=4, train=True,
+                 text_table=None):
         self.eps, self.vocab, self.H = eps, vocab, horizon
+        self.text_table = text_table
         self.shift_aug, self.train = shift_aug, train
         self.index = [(i, t) for i, e in enumerate(eps) for t in range(len(e["action"]))]
         if state_stats is None:
@@ -106,4 +108,5 @@ class DemoDataset(Dataset):
                     state=torch.from_numpy(st.astype(np.float32)),
                     tokens=torch.from_numpy(self.tok[e["instruction"]]),
                     action=torch.from_numpy(e["action"][idx]),
+                    instr_id=(self.text_table.index(e["instruction"]) if self.text_table else 0),
                     mask=torch.from_numpy(mask))

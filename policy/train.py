@@ -33,6 +33,16 @@ def deep_set(d, dotted, value):
     d[keys[-1]] = value
 
 
+def attach_text(batch, table, dev):
+    """把 batch 搬到设备上；用预训练文本编码器时，按 instr_id 从表里取 token 特征。"""
+    out = {k: v.to(dev) for k, v in batch.items()}
+    if table is not None:
+        idx = batch["instr_id"].long()
+        out["lang_feat"] = table.feats[idx].to(dev)
+        out["lang_mask"] = table.mask[idx].to(dev)
+    return out
+
+
 def model_kwargs(cfg):
     """从 config 里取模型超参，带默认值——老的 config.yaml 里没有 head 之类的键。"""
     m = cfg["model"]
@@ -43,7 +53,7 @@ def model_kwargs(cfg):
                 ss_raw=m.get("ss_raw", True), last_stride=m.get("last_stride", 1),
                 backbone=m.get("backbone", "cnn"), pretrained=m.get("pretrained", True),
                 freeze_backbone=m.get("freeze_backbone", False),
-                aux_weight=m.get("aux_weight", 0.0))
+                aux_weight=m.get("aux_weight", 0.0), pre_dim=m.get("pre_dim", 512))
 
 
 def build(cfg, eps=None):
@@ -57,12 +67,18 @@ def build(cfg, eps=None):
     perm = rng.permutation(len(eps))
     val_eps = [eps[i] for i in perm[:n_val]]
     tr_eps = [eps[i] for i in perm[n_val:]]
+    table = None
+    if cfg["model"]["lang_mode"] in ("ppool", "ptok"):
+        from policy.text_encoder import TextTable
+        table = TextTable([e["instruction"] for e in eps],
+                          cfg["model"].get("text_model", "BAAI/bge-small-zh-v1.5"))
+        print(f"预训练文本编码器：{len(table.texts)} 条不同指令 → {tuple(table.feats.shape)}")
     tr = DemoDataset(tr_eps, vocab, cfg["model"]["horizon"], train=True,
-                     shift_aug=cfg["data"]["shift_aug"])
+                     shift_aug=cfg["data"]["shift_aug"], text_table=table)
     va = DemoDataset(val_eps, vocab, cfg["model"]["horizon"],
-                     state_stats=(tr.smean, tr.sstd), train=False)
+                     state_stats=(tr.smean, tr.sstd), train=False, text_table=table)
     model = VLAPolicy(vocab=len(vocab), **model_kwargs(cfg))
-    return tr, va, model, vocab
+    return tr, va, model, vocab, table
 
 
 def main():
@@ -84,7 +100,7 @@ def main():
     os.makedirs(out, exist_ok=True)
     yaml.safe_dump(cfg, open(f"{out}/config.yaml", "w"), allow_unicode=True)
 
-    tr, va, model, vocab = build(cfg)
+    tr, va, model, vocab, table = build(cfg)
     dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model.to(dev)
     print(f"训练样本 {len(tr)}  验证样本 {len(va)}  参数 {sum(p.numel() for p in model.parameters())/1e6:.2f}M  设备 {dev}")
@@ -102,7 +118,7 @@ def main():
     step, t0 = 0, time.time()
     while step < total:
         for batch in dl:
-            batch = {k: v.to(dev) for k, v in batch.items()}
+            batch = attach_text(batch, table, dev)
             loss, info = model.loss(batch)
             opt.zero_grad(set_to_none=True)
             loss.backward()
@@ -121,7 +137,7 @@ def main():
                 vals = []
                 with torch.no_grad():
                     for j, vb in enumerate(vdl):
-                        vb = {k: v.to(dev) for k, v in vb.items()}
+                        vb = attach_text(vb, table, dev)
                         _, vi = model.loss(vb)
                         vals.append(vi)
                         if j >= 20:

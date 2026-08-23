@@ -5,11 +5,13 @@ data:
   limit: null          # 只用前 N 条演示（数据量曲线用）
 model:
   horizon: 8
-  lang_mode: seq       # seq / bow / none
+  lang_mode: cls       # none / bow / seq / cls / ppool / ptok
   film: true
   backbone: cnn        # cnn（从零 4 层）/ resnet18（ImageNet 预训练）
   pretrained: true
   freeze_backbone: false
+  text_model: BAAI/bge-small-zh-v1.5
+  pre_dim: 512
   aux_weight: 0.0      # >0 时开启"目标在图像哪个像素"的辅助监督
   ss_raw: true         # 空间 softmax 前不接 ReLU/归一化（false 是第一版的写法）
   last_stride: 1       # 最后一层卷积的步长：1 → 16×16 特征图，2 → 8×8

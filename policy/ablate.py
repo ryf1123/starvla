@@ -20,6 +20,11 @@ SUITES = {
         ("lang_cls_nofilm", ["model.lang_mode=cls", "model.film=false"],
          "有语言但不做 FiLM：语言只在最后拼接"),
     ],
+    "pretrained_lang": [
+        ("lang_cls2", ["model.lang_mode=cls"], "字符级 CLS（默认基线）"),
+        ("lang_ppool", ["model.lang_mode=ppool"], "冻结句向量（bge-small-zh 的 CLS）"),
+        ("lang_ptok", ["model.lang_mode=ptok"], "冻结 token 特征 + 可学注意力池化"),
+    ],
     "cams": [
         ("cam_both", ["model.cams=[front, wrist]"], "两路相机（默认）"),
         ("cam_front", ["model.cams=[front]"], "只有前视：最后 2 cm 看不清"),
