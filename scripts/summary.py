@@ -13,6 +13,7 @@ import numpy as np
 SUITE_TITLE = {
     "vision": "视觉分支：空间 softmax 怎么接、特征图多大",
     "lang": "语言：到底有没有起作用",
+    "pretrained_lang": "预训练语言编码器：字符级 vs 冻结句向量 vs 冻结 token 序列",
     "cams": "相机：腕部相机值多少",
     "chunk": "动作分块：预测未来几步",
     "heads": "动作表示：回归 / 离散 token / 扩散",
@@ -127,12 +128,28 @@ def main():
               f"（抓错方块 {c.get('wrong_cube',0)} / 没抓起来 {c.get('no_grasp',0)} / "
               f"没进盘子 {c.get('off_plate',0)}）。", ""]
 
-    for suite in ("vision", "lang", "cams", "chunk", "heads", "backbone", "aux", "data"):
+    for suite in ("vision", "lang", "pretrained_lang", "cams", "chunk", "heads",
+                  "backbone", "aux", "data"):
         rows, done = suite_rows(suite)
         if len(rows) < 2:            # 只有基线一行的套件还没开跑，不占版面
             continue
         L += [f"## {SUITE_TITLE.get(suite, suite)}" + ("" if done else "（进行中）"), "",
               md_table(rows), ""]
+
+    if os.path.exists("runs/ablate_ensemble2.json"):
+        rows = json.load(open("runs/ablate_ensemble2.json"))
+        if os.path.exists("runs/ablate_ensemble.json"):
+            rows += json.load(open("runs/ablate_ensemble.json"))
+        rows = sorted(rows, key=lambda r: (r["k"], -r["n"]))
+        L += ["## 时间集成（纯推理侧开关，不用重训）", "",
+              "| 集成窗口 k | 局数 | 成功率 | 平均步数 |", "|---|---|---|---|"]
+        seen = set()
+        for r in rows:
+            if (r["k"], r["n"]) in seen:
+                continue
+            seen.add((r["k"], r["n"]))
+            L.append(f"| {r['k']} | {r['n']} | **{r['sr']:.0%}** | {r['steps']:.0f} |")
+        L += ["", "k 越大越差，且平均步数越长。见 `notes/07`。", ""]
 
     gens = sorted(glob.glob("runs/*/generalize.json"))
     if gens:
