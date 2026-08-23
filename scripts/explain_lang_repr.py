@@ -20,7 +20,7 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-from scripts._style import save
+from scripts._style import save, C
 
 TEXTS = [
     ("把红色方块放进黄色盘子", "基准"),
@@ -86,5 +86,34 @@ def main():
         print(f"{name:<28}{M[0,1]:>20.3f}{M[0,2]:>20.3f}")
 
 
+def fig_vocab(run="runs/bc_v3"):
+    """把字符词表实际能认出多少字画出来——换措辞为什么会 0%，一眼就看懂。"""
+    import torch
+    from policy.eval import load_policy
+    _, vocab, _, _, _ = load_policy(run, torch.device("cpu"))
+    texts = [t for t, _ in TEXTS]
+    fig, ax = plt.subplots(figsize=(11, 0.62 * len(texts) + 1.6))
+    ax.axis("off")
+    ax.set_title(f"训练指令建出来的字符词表只有 {len(vocab)-1} 个字："
+                 f"{''.join(vocab.itos[1:])}\n"
+                 "灰色 = 词表里没有这个字，会被当成 padding 丢掉", fontsize=10.5)
+    for i, (t, name) in enumerate(TEXTS):
+        y = 1 - (i + 1) * (1.0 / (len(texts) + 1))
+        ax.text(-0.01, y, name, fontsize=9, ha="right", va="center", color=C["grey"])
+        kept = 0
+        for j, ch in enumerate(t):
+            known = ch in vocab.stoi
+            kept += known
+            ax.text(0.02 + j * 0.045, y, ch, fontsize=13, ha="center", va="center",
+                    color="#1a202c" if known else "#cbd5e0",
+                    bbox=dict(boxstyle="round,pad=0.18", fc="#ebf8ff" if known else "#f7fafc",
+                              ec="#90cdf4" if known else "#e2e8f0"))
+        ax.text(0.02 + 16 * 0.045, y, f"认出 {kept}/{len(t)} 字", fontsize=9,
+                va="center", color=C["act"] if kept == len(t) else C["warn"])
+    ax.set_xlim(-0.22, 0.92); ax.set_ylim(0, 1)
+    save(fig, "docs/figs/lang_vocab.png")
+
+
 if __name__ == "__main__":
     main()
+    fig_vocab()
