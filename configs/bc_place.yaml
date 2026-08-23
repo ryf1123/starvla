@@ -1,5 +1,5 @@
 data:
-  path: data/demos/place2p
+  path: data/demos/place800
   val_frac: 0.1
   shift_aug: 4
   limit: null          # 只用前 N 条演示（数据量曲线用）

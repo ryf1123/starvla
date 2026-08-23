@@ -26,11 +26,32 @@ def _worker(args):
         ex = ScriptedExpert(env, rng=rng, noise=cfg["noise"])
         F, W, S, A = [], [], [], []
         done = False
+        # 扰动（DAgger 思路）：在抓取前的某一步执行几个随机动作，**这些步不记录**，
+        # 然后继续记录专家从这个歪掉的状态怎么纠正回来。
+        # 没有这种数据，策略一旦抓空就永远回不来——实测失败局会 140 步全程夹着空气。
+        # 'close' 型扰动专治"提前闭合夹爪"：让专家演示"张开、重新对准"。
+        do_perturb = rng.random() < cfg["perturb_prob"]
+        t_p = int(rng.integers(2, 16))
+        p_kind = "close" if rng.random() < 0.4 else "shift"
+        p_len = int(rng.integers(1, 4))
+        t = 0
         while not done:
+            if do_perturb and t == t_p and ex.phase <= 4:
+                for _ in range(p_len):
+                    pa = np.zeros(5)
+                    pa[:3] = rng.uniform(-1, 1, 3)
+                    pa[3] = rng.uniform(-1, 1)
+                    pa[4] = -1.0 if p_kind == "close" else 1.0
+                    obs, r, done, info = env.step(pa)      # 执行但不记录
+                    if done:
+                        break
+                if done:
+                    break
             a = ex.act()
             F.append(obs["front"]); W.append(obs["wrist"])
             S.append(obs["state"]); A.append(a.astype(np.float32))
             obs, r, done, info = env.step(a)
+            t += 1
         if not info["success"]:
             n_fail += 1
             if not cfg["keep_fail"]:
@@ -54,10 +75,13 @@ def main():
     ap.add_argument("--task-type", default="place")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--keep-fail", action="store_true")
+    ap.add_argument("--perturb-prob", type=float, default=0.5,
+                    help="多大比例的 episode 会被中途扰动（生成恢复数据）")
     args = ap.parse_args()
 
     cfg = dict(noise=args.noise, img_hw=args.img_hw, n_cubes=args.n_cubes,
-               n_plates=args.n_plates, task_type=args.task_type, keep_fail=args.keep_fail)
+               n_plates=args.n_plates, task_type=args.task_type, keep_fail=args.keep_fail,
+               perturb_prob=args.perturb_prob)
     out = f"data/demos/{args.name}"
     os.makedirs(out, exist_ok=True)
     per = [args.episodes // args.workers + (i < args.episodes % args.workers)

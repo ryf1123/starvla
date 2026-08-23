@@ -81,15 +81,19 @@ class TabletopEnv:
             self.data.qpos[a + 3:a + 7] = [np.cos(yaw / 2), 0, 0, np.sin(yaw / 2)]
 
         mujoco.mj_forward(self.model, self.data)
-        # 把末端摆到 home 位姿（IK 一次），夹爪张开
-        q, _, _ = solve_ik(self.model, self.data, self.layout, HOME_TCP, 0.0, HOME_QPOS, iters=60)
+        # 把末端摆到 home 位姿（IK 一次），夹爪张开。
+        # home 位姿要抖动：不抖的话每局到达方块的步数几乎一样，
+        # 策略会学成"第 10 步闭合夹爪"这个时序，而不是"到位了才闭合"这个条件。
+        tcp0 = HOME_TCP + self.rng.uniform(-1, 1, 3) * np.array([0.06, 0.08, 0.04])
+        yaw0 = float(self.rng.uniform(-0.25, 0.25))
+        q, _, _ = solve_ik(self.model, self.data, self.layout, tcp0, yaw0, HOME_QPOS, iters=60)
         self.data.qpos[self.layout["arm_qadr"]] = q
         self.data.ctrl[:7] = q
         self.data.ctrl[7] = GRIP_OPEN
         mujoco.mj_forward(self.model, self.data)
 
         self.ee_pos = self.tcp().copy()
-        self.ee_yaw = 0.0
+        self.ee_yaw = yaw0
         self.grip_cmd = 1.0
         self.t = 0
         self._success_hold = 0

@@ -52,6 +52,14 @@ class ScriptedExpert:
         yaw_t = _wrap_grasp_yaw(s.cube_yaw[s.target_cube])
         p = env.ee_pos                                  # 用"指令位置"而不是实际 TCP，避免 IK 滞后累积
 
+        # 抓空/掉了就退回第 0 段重抓。
+        # 专家自己会重试，数据里才会出现"失败之后怎么办"；否则策略抓空一次就永远回不来。
+        if self.phase in (3, 4):
+            held = (np.linalg.norm(env.tcp() - cube) < 0.06
+                    and env.grip_width() > 0.015 and env.grip_width() < 0.075)
+            if not held:
+                self.phase, self.hold = 0, 0
+
         grip = 1.0                                       # +1 张开
         if self.phase == 0:
             tgt = np.array([cube[0], cube[1], TABLE_TOP + HOVER_H])

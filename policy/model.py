@@ -45,19 +45,26 @@ class SpatialSoftmax(nn.Module):
 
 
 class VisionEncoder(nn.Module):
-    """4 层 CNN，第 3 层后接 FiLM。128×128 → 8×8 特征图 → 32 个关键点。"""
+    """4 层 CNN，第 3 层后接 FiLM。128×128 → 16×16 特征图 → 128 个关键点。
 
-    def __init__(self, ch=(32, 64, 128, 128), lang_dim=128, film=True):
+    最后一层用 stride=1：特征图停在 16×16 而不是 8×8。
+    8×8 时每个格子对应桌面上约 4–5 cm，空间 softmax 的期望坐标虽然是连续的，
+    但底层特征太粗，实测策略闭合夹爪时的水平误差普遍 30–80 mm（方块只有 44 mm 宽）。
+    见 notes/02-闭环失败诊断.md。
+    """
+
+    def __init__(self, ch=(32, 64, 128, 128), lang_dim=128, film=True, last_stride=1):
         super().__init__()
         c0 = 3
         layers = []
-        for c in ch:
-            layers += [nn.Conv2d(c0, c, 3, stride=2, padding=1), nn.GroupNorm(8, c), nn.ReLU()]
+        for i, c in enumerate(ch):
+            st = 2 if i < len(ch) - 1 else last_stride
+            layers += [nn.Conv2d(c0, c, 3, stride=st, padding=1), nn.GroupNorm(8, c), nn.ReLU()]
             c0 = c
         self.stem = nn.Sequential(*layers[:9])      # 前 3 个 block → (B,128,16,16)
-        self.tail = nn.Sequential(*layers[9:])      # 第 4 个 block → (B,128,8,8)
+        self.tail = nn.Sequential(*layers[9:])      # 第 4 个 block → (B,128,16,16)
         self.film = nn.Linear(lang_dim, 2 * ch[2]) if film else None
-        self.ss = SpatialSoftmax(8, 8)
+        self.ss = SpatialSoftmax(16, 16)
         self.out_dim = ch[-1] * 2
 
     def forward(self, img, z_lang=None):
