@@ -80,7 +80,8 @@ python -m policy.train --config configs/bc_place.yaml --name quick \
 python -m policy.eval --run runs/quick --episodes 20 --video videos/quick.mp4
 ```
 
-正式一轮：500 条演示 + 12000 步训练（约 19 分钟）+ 50 局闭环评测。
+正式一轮：800 条演示 + 16000 步训练（约 40 分钟）+ 50 局闭环评测。
+当前基线 `bc_v3`：**80 局闭环 83.8%**（关掉时间集成；开 k=4 时是 75%），抓错方块 0 局。
 
 ```bash
 python -m expert.collect --name place800 --episodes 800 --workers 8 --noise 0.05 --perturb-prob 0.6
