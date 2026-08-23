@@ -7,13 +7,17 @@
 """
 from __future__ import annotations
 
-import argparse, json, subprocess, sys, time
+import argparse, json, os, subprocess, sys, time
 import numpy as np
+
+# 约定：overrides 为 None 的那一项是**共享基线**（runs/bc_v3，16000 步），不重新训练。
+# 这样每个套件只需要训变体，一晚上能多跑好几组。
+BASELINE_RUN = "runs/bc_v3"
 
 SUITES = {
     # name              overrides                      一句话：这一组在问什么
     "lang": [
-        ("lang_cls", ["model.lang_mode=cls"], "CLS 读出 + 放大位置编码（修复版，主基线）"),
+        ("bc_v3", None, "CLS 读出 + 放大位置编码（基线）"),
         ("lang_seq", ["model.lang_mode=seq"], "均值池化的 Transformer（实测会退化成词袋）"),
         ("lang_bow", ["model.lang_mode=bow"], "字符词袋：颜色顺序被抹平"),
         ("lang_none", ["model.lang_mode=none"], "完全拿不到指令：只能瞎猜抓哪个"),
@@ -21,18 +25,17 @@ SUITES = {
          "有语言但不做 FiLM：语言只在最后拼接"),
     ],
     "pretrained_lang": [
-        ("lang_cls2", ["model.lang_mode=cls"], "字符级 CLS（默认基线）"),
+        ("bc_v3", None, "字符级 CLS（基线）"),
         ("lang_ppool", ["model.lang_mode=ppool"], "冻结句向量（bge-small-zh 的 CLS）"),
         ("lang_ptok", ["model.lang_mode=ptok"], "冻结 token 特征 + 可学注意力池化"),
     ],
     "cams": [
-        ("cam_both", ["model.cams=[front, wrist]"], "两路相机（默认）"),
+        ("bc_v3", None, "两路相机（基线）"),
         ("cam_front", ["model.cams=[front]"], "只有前视：最后 2 cm 看不清"),
         ("cam_wrist", ["model.cams=[wrist]"], "只有腕视：看不到全局，不知道盘子在哪"),
     ],
     "vision": [
-        ("vis_raw16", ["model.ss_raw=true", "model.last_stride=1"],
-         "原始 logits + 16×16 特征图（现在的默认）"),
+        ("bc_v3", None, "原始 logits + 16×16 特征图（基线）"),
         ("vis_relu16", ["model.ss_raw=false", "model.last_stride=1"],
          "softmax 前接 GroupNorm+ReLU（第一版写法）"),
         ("vis_raw8", ["model.ss_raw=true", "model.last_stride=2"],
@@ -41,7 +44,7 @@ SUITES = {
          "第一版的完整写法：ReLU + 8×8"),
     ],
     "backbone": [
-        ("bb_cnn", ["model.backbone=cnn"], "从零 4 层 CNN（1.3 M 参数）"),
+        ("bc_v3", None, "从零 4 层 CNN（基线）"),
         ("bb_r18", ["model.backbone=resnet18"], "ImageNet 预训练 ResNet18，全部微调"),
         ("bb_r18_frozen", ["model.backbone=resnet18", "model.freeze_backbone=true"],
          "预训练 ResNet18，骨干冻结"),
@@ -49,13 +52,13 @@ SUITES = {
          "ResNet18 结构但随机初始化——区分「结构」和「预训练权重」哪个在起作用"),
     ],
     "aux": [
-        ("aux_0", ["model.aux_weight=0.0"], "只用动作监督（默认）"),
+        ("bc_v3", None, "只用动作监督（基线）"),
         ("aux_1", ["model.aux_weight=1.0"], "加「目标在图像哪个像素」的辅助监督"),
         ("aux_1_small", ["model.aux_weight=1.0", "data.limit=150"], "辅助监督 + 只有 150 条数据"),
         ("aux_0_small", ["model.aux_weight=0.0", "data.limit=150"], "无辅助监督 + 只有 150 条数据"),
     ],
     "heads": [
-        ("head_regress", ["model.head=regress"], "连续回归 + L1（ACT 路线，默认）"),
+        ("bc_v3", None, "连续回归 + L1（ACT 路线，基线）"),
         ("head_discrete", ["model.head=discrete"], "每维 41 个格子 + 交叉熵（RT-1 路线）"),
         ("head_diffusion", ["model.head=diffusion"], "10 步 DDIM 去噪（Diffusion Policy 路线）"),
     ],
@@ -63,12 +66,12 @@ SUITES = {
         ("data_075", ["data.limit=75"], "75 条演示"),
         ("data_150", ["data.limit=150"], "150 条"),
         ("data_300", ["data.limit=300"], "300 条"),
-        ("data_600", ["data.limit=600"], "600 条（全部）"),
+        ("bc_v3", None, "800 条（全部，基线）"),
     ],
     "chunk": [
         ("chunk1", ["model.horizon=1"], "不分块：逐步预测，复合误差最大"),
         ("chunk4", ["model.horizon=4"], ""),
-        ("chunk8", ["model.horizon=8"], "默认"),
+        ("bc_v3", None, "基线"),
         ("chunk16", ["model.horizon=16"], "块太长：后半段和当前观测关系变弱"),
     ],
 }
@@ -91,14 +94,21 @@ def main():
     rows = []
     for name, overrides, why in SUITES[args.suite]:
         t0 = time.time()
-        if not args.skip_train:
+        if overrides is None:
+            name = BASELINE_RUN.split("/")[-1]      # 共享基线，不训练
+        elif not args.skip_train:
             run([sys.executable, "-u", "-m", "policy.train", "--config", args.config,
                  "--name", name, "--steps", str(args.steps), "--set", *overrides])
         from policy.eval import evaluate
-        sr, res = evaluate(f"runs/{name}", episodes=args.episodes, seed=1000,
-                           video=f"videos/{name}.mp4")
-        json.dump(dict(success_rate=sr, results=res), open(f"runs/{name}/eval.json", "w"),
-                  ensure_ascii=False, indent=2)
+        cache = f"runs/{name}/eval.json"
+        if overrides is None and os.path.exists(cache):
+            d = json.load(open(cache))             # 基线只评一次，各套件复用
+            sr, res = d["success_rate"], d["results"]
+        else:
+            sr, res = evaluate(f"runs/{name}", episodes=args.episodes, seed=1000,
+                               video=f"videos/{name}.mp4")
+            json.dump(dict(success_rate=sr, results=res), open(cache, "w"),
+                      ensure_ascii=False, indent=2)
         from collections import Counter
         cnt = Counter(r["outcome"] for r in res)
         rows.append(dict(name=name, why=why, sr=sr, minutes=(time.time() - t0) / 60,
