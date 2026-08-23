@@ -55,5 +55,47 @@ def main():
     save(fig, "docs/figs/vision_health.png")
 
 
+def fig_grid():
+    """2×2 表：softmax 接法 × 特征图分辨率，各自的闭环成功率。"""
+    import json, os
+    import matplotlib.pyplot as plt
+    from scripts.summary import wilson
+    cells = {("原始 logits", "16×16"): "runs/bc_v3",
+             ("ReLU 之后", "16×16"): "runs/vis_relu16",
+             ("原始 logits", "8×8"): "runs/vis_raw8",
+             ("ReLU 之后", "8×8"): "runs/vis_relu8"}
+    fig, ax = plt.subplots(figsize=(7.4, 4.2))
+    ax.axis("off")
+    rows = ["原始 logits", "ReLU 之后"]
+    cols = ["16×16", "8×8"]
+    ax.text(0.5, 0.95, "空间 softmax 接法 × 特征图分辨率（每格 40 局闭环）",
+            ha="center", fontsize=11)
+    for j, c in enumerate(cols):
+        ax.text(0.38 + j * 0.30, 0.80, f"特征图 {c}", ha="center", fontsize=10, color=C["grey"])
+    for i, r in enumerate(rows):
+        ax.text(0.16, 0.62 - i * 0.26, r, ha="right", va="center", fontsize=10, color=C["grey"])
+        for j, c in enumerate(cols):
+            d = cells[(r, c)]
+            f = f"{d}/eval.json"
+            if not os.path.exists(f):
+                txt, col = "（未完成）", "#a0aec0"
+            else:
+                e = json.load(open(f))
+                k = sum(1 for x in e["results"] if x["outcome"] == "success")
+                n = len(e["results"])
+                lo, hi = wilson(k, n)
+                txt = f"{e['success_rate']:.0%}\n{lo:.0%}–{hi:.0%}"
+                col = C["act"] if e["success_rate"] > 0.6 else C["warn"]
+            ax.text(0.38 + j * 0.30, 0.62 - i * 0.26, txt, ha="center", va="center",
+                    fontsize=15, color=col,
+                    bbox=dict(boxstyle="round,pad=0.5", fc="white", ec=col, lw=1.6))
+    ax.text(0.5, 0.06,
+            "读法：决定成败的是特征图分辨率，不是 softmax 前面接不接 ReLU。\n"
+            "我一开始把因果安在了后者身上——见 notes/02 末尾的更正。",
+            ha="center", fontsize=9.5, color=C["warn"])
+    save(fig, "docs/figs/vision_grid.png")
+
+
 if __name__ == "__main__":
     main()
+    fig_grid()
