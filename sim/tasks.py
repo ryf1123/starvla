@@ -44,6 +44,8 @@ def _sample_xy(rng, n, min_dist, existing=None):
                 out.append(p)
                 break
         else:
+            if min_dist > 0.06:                       # 放宽间距重试（物体多时工作区会挤）
+                return _sample_xy(rng, n, min_dist * 0.85, existing)
             raise RuntimeError("采样不到不重叠的位置，把工作区放大或物体数量调小")
     return np.array(out)
 
@@ -62,9 +64,15 @@ def sample_task(rng, task_type="place", n_cubes=3, n_plates=2) -> TaskSpec:
     """
     colors = list(COLORS)
     rng.shuffle(colors)
-    cube_colors = colors[:n_cubes]
+    if n_cubes <= len(colors):
+        cube_colors = colors[:n_cubes]
+    else:
+        # 干扰物比颜色多时允许重复，但**目标方块的颜色必须唯一**，否则指令有歧义
+        cube_colors = colors + [str(c) for c in rng.choice(colors, n_cubes - len(colors))]
+        rng.shuffle(cube_colors)
     # 盘子颜色从方块颜色里取，保证两种读法在同一场景下都说得通
-    plate_colors = [str(c) for c in rng.choice(cube_colors, min(n_plates, n_cubes), replace=False)]
+    pool = list(dict.fromkeys(cube_colors))          # 去重后的方块颜色
+    plate_colors = [str(c) for c in rng.choice(pool, min(n_plates, len(pool)), replace=False)]
 
     plate_xy = _sample_xy(rng, n_plates, 0.22)
     cube_xy = _sample_xy(rng, n_cubes, 0.11, existing=list(plate_xy))
@@ -74,7 +82,8 @@ def sample_task(rng, task_type="place", n_cubes=3, n_plates=2) -> TaskSpec:
             c = _sample_xy(rng, 1, 0.11, existing=list(plate_xy) + list(cube_xy))[0]
             cube_xy[i] = c
 
-    tc = int(rng.integers(n_cubes))
+    uniq = [i for i, c in enumerate(cube_colors) if cube_colors.count(c) == 1]
+    tc = int(rng.choice(uniq)) if uniq else int(rng.integers(len(cube_colors)))
     # 目标盘子的颜色不等于目标方块的颜色，否则「把红方块放进红盘子」少了一半信息量
     cand = [i for i in range(len(plate_colors)) if plate_colors[i] != cube_colors[tc]]
     tp = int(rng.choice(cand)) if cand else int(rng.integers(len(plate_colors)))
