@@ -73,13 +73,25 @@ class VisionEncoder(nn.Module):
 
 
 class LanguageEncoder(nn.Module):
-    """mode='seq' 有序 Transformer；mode='bow' 字符词袋（消融用）；mode='none' 常数。"""
+    """四种模式，对应四组对照实验：
+
+        none  常数向量——策略拿不到指令，只能瞎猜该抓哪个方块
+        bow   字符嵌入求平均（词袋）——「红→黄」和「黄→红」字符集相同，编码必然相同
+        seq   加位置编码的 1 层 Transformer + 均值池化——**看起来**有序，实测仍会退化成词袋
+        cls   同上但用一个可学的 [CLS] token 读出，位置编码初始化放大到 0.2
+
+    seq 退化这件事是实测出来的（见 notes/03-语言.md）：训完之后
+    ‖z(红→黄) − z(黄→红)‖ = 0.046，而换一组颜色是 2.72——均值池化把顺序抹平了，
+    位置编码的梯度信号又太弱（std 只从 0.020 长到 0.023）。cls 模式是修复版。
+    """
 
     def __init__(self, vocab, dim=128, max_len=20, mode="seq"):
         super().__init__()
         self.mode = mode
         self.emb = nn.Embedding(vocab, dim, padding_idx=0)
-        self.pos = nn.Parameter(torch.randn(1, max_len, dim) * 0.02)
+        pos_scale = 0.2 if mode == "cls" else 0.02
+        self.pos = nn.Parameter(torch.randn(1, max_len + 1, dim) * pos_scale)
+        self.cls = nn.Parameter(torch.randn(1, 1, dim) * 0.02)
         enc = nn.TransformerEncoderLayer(dim, 4, dim * 2, batch_first=True, dropout=0.0)
         # enable_nested_tensor=False 是必须的：eval() 模式下 PyTorch 会走 nested tensor 快路径，
         # 而 aten::_nested_tensor_from_mask_left_aligned 在 MPS 上没实现，训练时不报错、
@@ -94,10 +106,14 @@ class LanguageEncoder(nn.Module):
         x = self.emb(tokens)
         if self.mode == "bow":
             return x.masked_fill(pad[..., None], 0).sum(1) / (~pad).sum(1, keepdim=True).clamp(min=1)
+        if self.mode == "cls":
+            x = torch.cat([self.cls.expand(x.shape[0], -1, -1), x], dim=1)
+            pad = torch.cat([torch.zeros_like(pad[:, :1]), pad], dim=1)
+            x = x + self.pos[:, : x.shape[1]]
+            return self.tr(x, src_key_padding_mask=pad)[:, 0]
         x = x + self.pos[:, : x.shape[1]]
         x = self.tr(x, src_key_padding_mask=pad)
-        x = x.masked_fill(pad[..., None], 0).sum(1) / (~pad).sum(1, keepdim=True).clamp(min=1)
-        return x
+        return x.masked_fill(pad[..., None], 0).sum(1) / (~pad).sum(1, keepdim=True).clamp(min=1)
 
 
 class VLAPolicy(nn.Module):

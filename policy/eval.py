@@ -69,6 +69,26 @@ class Runner:
         return a
 
 
+def classify(env, moved_thresh=0.03):
+    """失败归因：光看成功率不知道错在哪，要把失败分类。
+
+    wrong_cube  动了别的方块 → 语言没接上（抓错东西）
+    no_grasp    目标方块基本没动 → 定位或抓取失败
+    off_plate   目标方块动了但没进盘子 → 放置精度不够
+    """
+    s = env.spec
+    moved = [np.linalg.norm(env.cube_pos(i)[:2] - s.cube_xy[i]) for i in range(len(s.cube_colors))]
+    tgt_moved = moved[s.target_cube] > moved_thresh
+    other_moved = any(m > moved_thresh for i, m in enumerate(moved) if i != s.target_cube)
+    if env.success():
+        return "success"
+    if other_moved and not tgt_moved:
+        return "wrong_cube"
+    if not tgt_moved:
+        return "no_grasp"
+    return "off_plate"
+
+
 def evaluate(run, episodes=50, seed=1000, k=4, video=None, env_kwargs=None,
              instruction_fn=None, device=None):
     device = device or torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -86,8 +106,9 @@ def evaluate(run, episodes=50, seed=1000, k=4, video=None, env_kwargs=None,
                 frames.append(np.concatenate([obs["front"], obs["wrist"]], axis=1))
             a = runner.act(obs)
             obs, r, done, info = env.step(a)
-        results.append(dict(success=bool(info["success"]), steps=env.t,
-                            instruction=instr, target=env.spec.target_cube))
+        results.append(dict(success=bool(info["success"]), steps=env.t, outcome=classify(env),
+                            instruction=instr, target=env.spec.target_cube,
+                            target_color=env.spec.cube_colors[env.spec.target_cube]))
     sr = float(np.mean([r["success"] for r in results]))
     if video and frames:
         import imageio
@@ -106,8 +127,11 @@ def main():
     ap.add_argument("--out", default=None, help="把逐 episode 结果写成 json")
     args = ap.parse_args()
     sr, res = evaluate(args.run, args.episodes, args.seed, args.ensemble, args.video)
+    from collections import Counter
+    cnt = Counter(r["outcome"] for r in res)
     print(f"成功率 {sr:.1%}  ({sum(r['success'] for r in res)}/{len(res)})  "
           f"平均步数 {np.mean([r['steps'] for r in res]):.1f}")
+    print("  失败归因：" + "  ".join(f"{k}={v}" for k, v in cnt.most_common()))
     if args.out:
         json.dump(dict(run=args.run, success_rate=sr, results=res),
                   open(args.out, "w"), ensure_ascii=False, indent=2)

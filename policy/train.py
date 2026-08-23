@@ -22,9 +22,11 @@ def deep_set(d, dotted, value):
     for k in keys[:-1]:
         d = d.setdefault(k, {})
     cur = d.get(keys[-1])
-    if isinstance(cur, bool) or value in ("true", "false"):
+    if isinstance(value, str) and value.startswith("["):        # --set model.cams=[front,wrist]
+        value = [x.strip() for x in value.strip("[]").split(",") if x.strip()]
+    elif isinstance(cur, bool) or value in ("true", "false"):
         value = value == "true"
-    elif isinstance(cur, int) and not isinstance(cur, bool):
+    elif isinstance(cur, int) and not isinstance(cur, bool) and not isinstance(value, list):
         value = int(value)
     elif isinstance(cur, float):
         value = float(value)
