@@ -56,10 +56,21 @@ def main():
 
     dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     kinds = [k for k in ("wrong_cube", "no_grasp", "off_plate") if k in by]
-    seeds = [s for k in kinds for s in by[k][:a.per_kind]]
+    # 多取几局备用：约 5% 的局在重跑时会因 MPS 浮点执行历史不同而翻转结果
+    # （见 notes/05-评测方法.md），所以按**重跑时的实际结果**筛选，而不是存档里的标签。
+    seeds = [s for k in kinds for s in by[k][:a.per_kind + 2]]
     if not seeds:
         print("没有失败局 🎉"); return
     eps = replay(a.run, seeds, dev)
+    kept, cnt = [], {}
+    for e in eps:
+        if e["outcome"] == "success":
+            continue
+        cnt[e["outcome"]] = cnt.get(e["outcome"], 0) + 1
+        if cnt[e["outcome"]] <= a.per_kind:
+            kept.append(e)
+    eps = kept
+    print("重跑后仍失败的局：", [(e["seed"], e["outcome"]) for e in eps])
 
     rows = len(eps)
     fig, axes = plt.subplots(rows, 5, figsize=(11.5, 2.35 * rows))
