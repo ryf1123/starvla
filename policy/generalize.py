@@ -76,10 +76,17 @@ def run_case(kind, run, episodes, seed0, device, video=None):
         if kind in ("paraphrase", "terse"):
             instr = paraphrase(spec, kind)
         if kind == "swap_role":
-            # 同一场景，把指令里的两个颜色对调；目标随之改成"另一种读法"
-            c, p = spec.cube_colors[spec.target_cube], spec.plate_colors[spec.target_plate]
-            if p not in spec.cube_colors or c not in spec.plate_colors:
-                continue                      # 这一局没法对调，跳过
+            # 同一场景，把指令里的两个颜色对调，目标随之改成"另一种读法"。
+            # 主动重采到"可对调"的场景（目标方块的颜色也是某个盘子的颜色，反之亦然），
+            # 而不是碰上不可对调就跳过——那样样本量只剩一半，区间没法看。
+            for _try in range(60):
+                c, p = spec.cube_colors[spec.target_cube], spec.plate_colors[spec.target_plate]
+                if p in spec.cube_colors and c in spec.plate_colors:
+                    break
+                obs = env.reset(seed=seed0 + ep + 7919 * (_try + 1))
+                spec = env.spec
+            else:
+                continue
             spec.target_cube = spec.cube_colors.index(p)
             spec.target_plate = spec.plate_colors.index(c)
             instr = f"把{p}色方块放进{c}色盘子"
