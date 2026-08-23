@@ -31,4 +31,4 @@ train:
   save_ckpts: [4000, 8000, 12000]   # 中途存档，用来画成功率 vs 步数曲线
 eval:
   episodes: 50
-  ensemble_k: 4        # 时间集成用最近 k 次预测
+  ensemble_k: 1        # 时间集成窗口。实测 k=1 最好（83.8%），k=4 只有 72.5%，见 notes/07
