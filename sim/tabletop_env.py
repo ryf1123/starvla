@@ -40,9 +40,11 @@ HOME_TCP = np.array([0.50, 0.0, TABLE_TOP + 0.22])
 
 class TabletopEnv:
     def __init__(self, n_cubes=3, n_plates=2, img_hw=128, max_steps=140,
-                 task_type="place", seed=0, render_cams=("front", "wrist")):
+                 task_type="place", seed=0, render_cams=("front", "wrist"),
+                 same_color_prob=0.0):
         self.n_cubes, self.n_plates = n_cubes, n_plates
         self.img_hw, self.max_steps, self.task_type = img_hw, max_steps, task_type
+        self.same_color_prob = same_color_prob
         self.render_cams = render_cams
         self.model, self.layout = build_scene(["红"] * n_cubes, ["黄"] * n_plates, img_hw)
         self.data = mujoco.MjData(self.model)
@@ -60,7 +62,8 @@ class TabletopEnv:
     def reset(self, spec: TaskSpec | None = None, seed=None):
         if seed is not None:
             self.rng = np.random.default_rng(seed)
-        self.spec = spec or sample_task(self.rng, self.task_type, self.n_cubes, self.n_plates)
+        self.spec = spec or sample_task(self.rng, self.task_type, self.n_cubes, self.n_plates,
+                                        self.same_color_prob)
         s = self.spec
         mujoco.mj_resetData(self.model, self.data)
 

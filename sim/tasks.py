@@ -50,7 +50,19 @@ def _sample_xy(rng, n, min_dist, existing=None):
     return np.array(out)
 
 
-def sample_task(rng, task_type="place", n_cubes=3, n_plates=2) -> TaskSpec:
+# 「左 / 右」按**前视相机画面**定义：世界 −y 出现在画面左侧，+y 在右侧（实测 y=±0.2 → u=∓0.603）。
+# 这个约定必须写死并说清楚——换成"机器人自己的左右"会正好相反。
+SAME_COLOR_MIN_DY = 0.10          # 两个同色方块至少差这么多 y，"左/右"才说得清
+
+
+def _positional_word(rng, cube_xy, idxs, tgt):
+    """目标方块和别的同色方块并存时，用画面里的左右来指认。"""
+    ys = sorted(idxs, key=lambda i: cube_xy[i][1])
+    return "左边的" if tgt == ys[0] else "右边的"
+
+
+def sample_task(rng, task_type="place", n_cubes=3, n_plates=2,
+                same_color_prob=0.0) -> TaskSpec:
     """采一局任务。
 
     关键设计：**盘子的颜色从方块用过的颜色里选**。
@@ -82,14 +94,32 @@ def sample_task(rng, task_type="place", n_cubes=3, n_plates=2) -> TaskSpec:
             c = _sample_xy(rng, 1, 0.11, existing=list(plate_xy) + list(cube_xy))[0]
             cube_xy[i] = c
 
-    uniq = [i for i, c in enumerate(cube_colors) if cube_colors.count(c) == 1]
-    tc = int(rng.choice(uniq)) if uniq else int(rng.integers(len(cube_colors)))
+    # 让两个方块同色：这样"红色方块"就不够用了，必须靠位置词指认。
+    # 训练集只有 12 条指令是本项目最大的局限（见 notes/03），这是扩大指令空间的第一步。
+    dup = None
+    if same_color_prob > 0 and n_cubes >= 2 and rng.random() < same_color_prob:
+        i, j = rng.choice(n_cubes, 2, replace=False)
+        # 两个同色方块的 y 必须拉开，否则"左/右"说不清
+        if abs(cube_xy[i][1] - cube_xy[j][1]) < SAME_COLOR_MIN_DY:
+            cube_xy[j][1] = cube_xy[i][1] + (SAME_COLOR_MIN_DY + 0.06) * (1 if cube_xy[i][1] < 0 else -1)
+            cube_xy[j][1] = float(np.clip(cube_xy[j][1], *WORKSPACE["y"]))
+        if abs(cube_xy[i][1] - cube_xy[j][1]) >= SAME_COLOR_MIN_DY:
+            cube_colors[int(j)] = cube_colors[int(i)]
+            dup = (int(i), int(j))
+
+    if dup is not None:
+        tc = int(rng.choice(dup))
+    else:
+        uniq = [i for i, c in enumerate(cube_colors) if cube_colors.count(c) == 1]
+        tc = int(rng.choice(uniq)) if uniq else int(rng.integers(len(cube_colors)))
     # 目标盘子的颜色不等于目标方块的颜色，否则「把红方块放进红盘子」少了一半信息量
     cand = [i for i in range(len(plate_colors)) if plate_colors[i] != cube_colors[tc]]
     tp = int(rng.choice(cand)) if cand else int(rng.integers(len(plate_colors)))
+    same = [i for i, c in enumerate(cube_colors) if c == cube_colors[tc]]
+    qual = _positional_word(rng, cube_xy, same, tc) if len(same) > 1 else ""
     if task_type == "lift":
-        instr = f"拿起{cube_colors[tc]}色方块"
+        instr = f"拿起{qual}{cube_colors[tc]}色方块"
     else:
-        instr = f"把{cube_colors[tc]}色方块放进{plate_colors[tp]}色盘子"
+        instr = f"把{qual}{cube_colors[tc]}色方块放进{plate_colors[tp]}色盘子"
     return TaskSpec(task_type, cube_colors, plate_colors, cube_xy,
                     rng.uniform(-0.4, 0.4, n_cubes), plate_xy, tc, tp, instr)

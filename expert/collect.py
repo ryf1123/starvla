@@ -18,7 +18,8 @@ def _worker(args):
     from sim.tabletop_env import TabletopEnv
     from expert.scripted import ScriptedExpert
     env = TabletopEnv(n_cubes=cfg["n_cubes"], n_plates=cfg["n_plates"],
-                      img_hw=cfg["img_hw"], task_type=cfg["task_type"], seed=seed0)
+                      img_hw=cfg["img_hw"], task_type=cfg["task_type"], seed=seed0,
+                      same_color_prob=cfg.get("same_color_prob", 0.0))
     rng = np.random.default_rng(seed0)
     eps, n_fail = [], 0
     for k in range(n_ep):
@@ -76,13 +77,15 @@ def main():
     ap.add_argument("--task-type", default="place")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--keep-fail", action="store_true")
+    ap.add_argument("--same-color-prob", type=float, default=0.0,
+                    help="多大比例的局有两个同色方块（指令改用「左边的/右边的」指认）")
     ap.add_argument("--perturb-prob", type=float, default=0.5,
                     help="多大比例的 episode 会被中途扰动（生成恢复数据）")
     args = ap.parse_args()
 
     cfg = dict(noise=args.noise, img_hw=args.img_hw, n_cubes=args.n_cubes,
                n_plates=args.n_plates, task_type=args.task_type, keep_fail=args.keep_fail,
-               perturb_prob=args.perturb_prob)
+               perturb_prob=args.perturb_prob, same_color_prob=args.same_color_prob)
     out = f"data/demos/{args.name}"
     os.makedirs(out, exist_ok=True)
     per = [args.episodes // args.workers + (i < args.episodes % args.workers)
