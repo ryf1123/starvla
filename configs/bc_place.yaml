@@ -31,4 +31,5 @@ train:
   save_ckpts: [4000, 8000, 12000]   # 中途存档，用来画成功率 vs 步数曲线
 eval:
   episodes: 50
+  same_color_prob: 0.0   # 评测场景里两个方块同色的概率，必须和训练数据一致
   ensemble_k: 4        # 时间集成窗口。消融期间统一用 4 保持可比；实测 k=1 更好（83.8% vs 72.5%），见 notes/07

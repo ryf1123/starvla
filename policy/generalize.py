@@ -41,12 +41,13 @@ def paraphrase(spec, style):
     return spec.instruction
 
 
-def make_env(kind, seed):
+def make_env(kind, seed, same_color_prob=0.0):
+    kw = dict(seed=seed, same_color_prob=same_color_prob)
     if kind == "distract5":
-        return TabletopEnv(seed=seed, n_cubes=5, n_plates=2)
+        return TabletopEnv(n_cubes=5, n_plates=2, **kw)
     if kind == "plate3":
-        return TabletopEnv(seed=seed, n_cubes=3, n_plates=3)
-    return TabletopEnv(seed=seed, n_cubes=3, n_plates=2)
+        return TabletopEnv(n_cubes=3, n_plates=3, **kw)
+    return TabletopEnv(n_cubes=3, n_plates=2, **kw)
 
 
 def push_to_corner(spec, rng):
@@ -62,7 +63,7 @@ def push_to_corner(spec, rng):
 
 def run_case(kind, run, episodes, seed0, device, video=None):
     model, vocab, cfg, smean, sstd = load_policy(run, device)
-    env = make_env(kind, seed0)
+    env = make_env(kind, seed0, cfg["eval"].get("same_color_prob", 0.0))
     runner = Runner(model, vocab, smean, sstd, device, k=cfg["eval"]["ensemble_k"])
     rng = np.random.default_rng(seed0)
     out, frames = [], []
