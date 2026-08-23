@@ -39,7 +39,7 @@ HOME_TCP = np.array([0.50, 0.0, TABLE_TOP + 0.22])
 
 
 class TabletopEnv:
-    def __init__(self, n_cubes=3, n_plates=1, img_hw=128, max_steps=140,
+    def __init__(self, n_cubes=3, n_plates=2, img_hw=128, max_steps=140,
                  task_type="place", seed=0, render_cams=("front", "wrist")):
         self.n_cubes, self.n_plates = n_cubes, n_plates
         self.img_hw, self.max_steps, self.task_type = img_hw, max_steps, task_type

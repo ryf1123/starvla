@@ -50,7 +50,7 @@ def main():
     ap.add_argument("--noise", type=float, default=0.05)
     ap.add_argument("--img-hw", type=int, default=128)
     ap.add_argument("--n-cubes", type=int, default=3)
-    ap.add_argument("--n-plates", type=int, default=1)
+    ap.add_argument("--n-plates", type=int, default=2)
     ap.add_argument("--task-type", default="place")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--keep-fail", action="store_true")

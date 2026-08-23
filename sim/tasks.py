@@ -48,13 +48,23 @@ def _sample_xy(rng, n, min_dist, existing=None):
     return np.array(out)
 
 
-def sample_task(rng, task_type="place", n_cubes=3, n_plates=1) -> TaskSpec:
+def sample_task(rng, task_type="place", n_cubes=3, n_plates=2) -> TaskSpec:
+    """采一局任务。
+
+    关键设计：**盘子的颜色从方块用过的颜色里选**。
+    如果盘子颜色永远不和方块重复（第一版就是这样），那么「颜色集合」就足以定位目标——
+    指令里出现的两个颜色，能在桌上找到方块的那个就是被抓的，另一个必然是盘子。
+    语序不携带任何信息，于是模型学到的最小充分表示就是一个词袋，
+    实测「红→黄」和「黄→红」的编码距离只有 0.046（换一组颜色是 2.72）。
+
+    让盘子和方块共用颜色之后，「把红色方块放进黄色盘子」和「把黄色方块放进红色盘子」
+    在同一个场景里都成立且结果不同——语序才真正成为必需的信息。
+    """
     colors = list(COLORS)
     rng.shuffle(colors)
     cube_colors = colors[:n_cubes]
-    plate_colors = colors[n_cubes:n_cubes + n_plates]
-    if len(plate_colors) < n_plates:      # 颜色不够就允许盘子和方块同色
-        plate_colors = list(rng.choice(colors, n_plates, replace=False))
+    # 盘子颜色从方块颜色里取，保证两种读法在同一场景下都说得通
+    plate_colors = [str(c) for c in rng.choice(cube_colors, min(n_plates, n_cubes), replace=False)]
 
     plate_xy = _sample_xy(rng, n_plates, 0.22)
     cube_xy = _sample_xy(rng, n_cubes, 0.11, existing=list(plate_xy))
@@ -65,7 +75,9 @@ def sample_task(rng, task_type="place", n_cubes=3, n_plates=1) -> TaskSpec:
             cube_xy[i] = c
 
     tc = int(rng.integers(n_cubes))
-    tp = int(rng.integers(n_plates))
+    # 目标盘子的颜色不等于目标方块的颜色，否则「把红方块放进红盘子」少了一半信息量
+    cand = [i for i in range(len(plate_colors)) if plate_colors[i] != cube_colors[tc]]
+    tp = int(rng.choice(cand)) if cand else int(rng.integers(len(plate_colors)))
     if task_type == "lift":
         instr = f"拿起{cube_colors[tc]}色方块"
     else:

@@ -1,5 +1,5 @@
 data:
-  path: data/demos/place500
+  path: data/demos/place2p
   val_frac: 0.1
   shift_aug: 4
 model:
