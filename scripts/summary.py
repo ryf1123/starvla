@@ -71,6 +71,44 @@ def md_table(rows):
     return "\n".join(out)
 
 
+def fig_all():
+    """所有已完成套件的成功率总图：每个套件一组柱子，基线用虚线标出。"""
+    import matplotlib.pyplot as plt
+    from scripts._style import save, C
+    suites = [(k, suite_rows(k)[0]) for k in
+              ("vision", "lang", "pretrained_lang", "cams", "chunk", "heads", "backbone", "aux", "data")]
+    suites = [(k, r) for k, r in suites if len(r) >= 2]
+    if not suites:
+        return
+    base = None
+    if os.path.exists("runs/bc_v3/eval.json"):
+        base = json.load(open("runs/bc_v3/eval.json"))["success_rate"]
+    n = len(suites)
+    fig, axes = plt.subplots(1, n, figsize=(3.1 * n, 4.0), sharey=True)
+    axes = np.atleast_1d(axes)
+    for ax, (k, rows) in zip(axes, suites):
+        rows = sorted(rows, key=lambda r: -r["sr"])
+        x = np.arange(len(rows))
+        cols = [C["act"] if r["name"] == "bc_v3" else C["front"] for r in rows]
+        ax.bar(x, [r["sr"] * 100 for r in rows], color=cols, alpha=0.9)
+        for xi, r in zip(x, rows):
+            nn = r["success"] + r["wrong_cube"] + r["no_grasp"] + r["off_plate"]
+            lo, hi = wilson(r["success"], nn)
+            ax.plot([xi, xi], [lo * 100, hi * 100], color="k", lw=1.2)
+            ax.text(xi, r["sr"] * 100 + 2, f"{r['sr']:.0%}", ha="center", fontsize=8)
+        ax.set_xticks(x)
+        ax.set_xticklabels([r["name"].replace("lang_", "").replace("vis_", "").replace("cam_", "")
+                            for r in rows], fontsize=8, rotation=30, ha="right")
+        if base:
+            ax.axhline(base * 100, color=C["grey"], ls="--", lw=1)
+        ax.set_title(SUITE_TITLE.get(k, k).split("：")[0], fontsize=9.5)
+        ax.grid(axis="y", alpha=0.3)
+    axes[0].set_ylabel("闭环成功率 (%)"); axes[0].set_ylim(0, 105)
+    fig.suptitle("消融总览（每组 40 局闭环，误差棒为 95% Wilson 区间，虚线为基线 bc_v3）", fontsize=11)
+    fig.tight_layout(rect=[0, 0, 1, 0.92])
+    save(fig, "docs/figs/ablation_all.png")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--feishu", action="store_true")
@@ -111,6 +149,7 @@ def main():
           "- 代码：https://github.com/ryf1123/starvla",
           "- 踩坑笔记：`notes/`；概念速查：`docs/concepts.md`；讲解图：`docs/figs/`", ""]
 
+    fig_all()
     txt = "\n".join(L)
     open("docs/SUMMARY.md", "w").write(txt)
     print(txt)
