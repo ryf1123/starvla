@@ -129,7 +129,7 @@ def main():
 
     for suite in ("vision", "lang", "cams", "chunk", "heads", "backbone", "aux", "data"):
         rows, done = suite_rows(suite)
-        if not rows:
+        if len(rows) < 2:            # 只有基线一行的套件还没开跑，不占版面
             continue
         L += [f"## {SUITE_TITLE.get(suite, suite)}" + ("" if done else "（进行中）"), "",
               md_table(rows), ""]

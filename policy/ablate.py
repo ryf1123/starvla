@@ -18,7 +18,7 @@ SUITES = {
     # name              overrides                      一句话：这一组在问什么
     "lang": [
         ("bc_v3", None, "CLS 读出 + 放大位置编码（基线）"),
-        ("lang_seq", ["model.lang_mode=seq"], "均值池化的 Transformer（实测会退化成词袋）"),
+        ("lang_seq", ["model.lang_mode=seq"], "字符 + 位置编码 + Transformer + 均值池化"),
         ("lang_bow", ["model.lang_mode=bow"], "字符词袋：颜色顺序被抹平"),
         ("lang_none", ["model.lang_mode=none"], "完全拿不到指令：只能瞎猜抓哪个"),
         ("lang_cls_nofilm", ["model.lang_mode=cls", "model.film=false"],
