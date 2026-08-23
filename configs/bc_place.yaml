@@ -28,6 +28,7 @@ train:
   workers: 0
   log_every: 100
   val_every: 1000
+  save_ckpts: [4000, 8000, 12000]   # 中途存档，用来画成功率 vs 步数曲线
 eval:
   episodes: 50
   ensemble_k: 4        # 时间集成用最近 k 次预测

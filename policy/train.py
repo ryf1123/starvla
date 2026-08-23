@@ -146,8 +146,14 @@ def main():
                 vmean.update(model.vision_diag(vb))    # 视觉分支健康检查
                 log.write(json.dumps(dict(step=step, **vmean)) + "\n"); log.flush()
                 print("  val", {k: round(v, 4) for k, v in vmean.items()})
-                torch.save(dict(model=model.state_dict(), cfg=cfg, vocab=vocab.save(),
-                                state_stats=(tr.smean, tr.sstd)), f"{out}/latest.pt")
+                ck = dict(model=model.state_dict(), cfg=cfg, vocab=vocab.save(),
+                          state_stats=(tr.smean, tr.sstd))
+                torch.save(ck, f"{out}/latest.pt")
+                # 中途存档：用来画"闭环成功率 vs 训练步数"的曲线。
+                # 这条曲线是必要的——同一配置 8000 步 10%、16000 步 72.5%，
+                # 而验证 L1 只差 16%（见 notes/02）。
+                if step in set(cfg["train"].get("save_ckpts", [])):
+                    torch.save(ck, f"{out}/ckpt_{step}.pt")
                 model.train()
             if step >= total:
                 break
