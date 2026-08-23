@@ -41,14 +41,33 @@ def suite_rows(suite):
     return rows, False
 
 
+def wilson(k, n, z=1.96):
+    """Wilson 区间：n=40 时 60% 的 95% 区间约 ±15 个百分点。
+
+    加这个是为了**不把噪声当结论**——两组差 10 个百分点，在 40 局下基本说明不了问题。
+    要下"A 比 B 好"的结论，要么差距远大于区间，要么把局数加上去。
+    """
+    if n == 0:
+        return 0.0, 0.0
+    ph = k / n
+    d = 1 + z * z / n
+    c = (ph + z * z / (2 * n)) / d
+    h = z * ((ph * (1 - ph) / n + z * z / (4 * n * n)) ** 0.5) / d
+    return max(0.0, c - h), min(1.0, c + h)
+
+
 def md_table(rows):
-    out = ["| 实验 | 成功率 | 抓错方块 | 没抓起来 | 没进盘子 | 在问什么 |",
-           "|---|---|---|---|---|---|"]
+    out = ["| 实验 | 成功率 | 95% 区间 | 抓错方块 | 没抓起来 | 没进盘子 | 在问什么 |",
+           "|---|---|---|---|---|---|---|"]
     best = max((r["sr"] for r in rows), default=0)
     for r in sorted(rows, key=lambda r: -r["sr"]):
         star = " ★" if r["sr"] >= best - 1e-9 else ""
-        out.append(f"| `{r['name']}`{star} | **{r['sr']:.0%}** | {r['wrong_cube']} | "
+        n = r["success"] + r["wrong_cube"] + r["no_grasp"] + r["off_plate"]
+        lo, hi = wilson(r["success"], n)
+        out.append(f"| `{r['name']}`{star} | **{r['sr']:.0%}** | {lo:.0%}–{hi:.0%} | {r['wrong_cube']} | "
                    f"{r['no_grasp']} | {r['off_plate']} | {r['why']} |")
+    out.append("")
+    out.append(f"（n={n} 局。95% Wilson 区间——差距小于区间宽度的结论不要当真。）")
     return "\n".join(out)
 
 
