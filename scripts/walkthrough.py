@@ -90,7 +90,9 @@ def main():
     sample = ds[10]
     print(f"  数据集 {len(eps)} 局 → {len(ds)} 个样本；词表 {len(vocab)} 个字符 {vocab.itos}")
     for k, v in sample.items():
-        print(f"  {k:<10}{str(tuple(v.shape)):<14}{v.dtype}")
+        shape = str(tuple(v.shape)) if hasattr(v, "shape") else "标量"
+        dtype = getattr(v, "dtype", type(v).__name__)
+        print(f"  {k:<10}{shape:<14}{dtype}")
     txt = eps[ds.index[10][0]]["instruction"]
     print(f"  指令「{txt}」→ tokens {sample['tokens'][:len(txt)].tolist()} + padding")
     print(f"  action 分块（未来 {cfg['model']['horizon']} 步）:")
@@ -101,7 +103,7 @@ def main():
     from policy.eval import load_policy, Runner
     dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model, vocab2, cfg2, smean, sstd = load_policy(args.run, dev)
-    b = {k: v[None].to(dev) for k, v in sample.items() if k in ("front", "wrist", "state", "tokens")}
+    b = {k: sample[k][None].to(dev) for k in ("front", "wrist", "state", "tokens")}
     with torch.no_grad():
         z = model.lang(b["tokens"])
         print(f"  语言编码器（{cfg2['model']['lang_mode']}）  tokens {tuple(b['tokens'].shape)} → z_lang {tuple(z.shape)}")
