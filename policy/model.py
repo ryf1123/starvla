@@ -97,6 +97,53 @@ class VisionEncoder(nn.Module):
         return kp, heat
 
 
+class ResNetEncoder(nn.Module):
+    """ImageNet 预训练的 ResNet18 骨干 + FiLM + 空间 softmax。
+
+    和从零 CNN 的对照是 PLAN 第三环的核心问题之一：**预训练的视觉特征
+    能不能替代"更多演示数据"**。ACT / Diffusion Policy 用的都是这一档骨干。
+
+    改动三处：
+      1. 去掉 avgpool 和 fc，保留到 layer4 的特征图（128×128 输入 → 4×4，太粗），
+         所以把 layer4 的 stride 改成 1 → 8×8；再把 layer3 也改成 1 → 16×16。
+      2. FiLM 插在 layer3 之后（和从零 CNN 的位置对应）。
+      3. 输入用 ImageNet 的均值方差归一化。
+    """
+
+    IMNET_MEAN = (0.485, 0.456, 0.406)
+    IMNET_STD = (0.229, 0.224, 0.225)
+
+    def __init__(self, lang_dim=128, film=True, pretrained=True, freeze=False):
+        super().__init__()
+        import torchvision
+        w = torchvision.models.ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
+        net = torchvision.models.resnet18(weights=w)
+        for layer in (net.layer3, net.layer4):
+            layer[0].conv1.stride = (1, 1)
+            layer[0].downsample[0].stride = (1, 1)
+        self.stem = nn.Sequential(net.conv1, net.bn1, net.relu, net.maxpool,
+                                  net.layer1, net.layer2, net.layer3)   # → (B,256,16,16)
+        self.tail = net.layer4[0]                                        # → (B,512,16,16)
+        self.proj = nn.Conv2d(512, 128, 1)        # 512 个通道太多，压到 128 个关键点
+        self.film = nn.Linear(lang_dim, 2 * 256) if film else None
+        self.ss = SpatialSoftmax(16, 16, temp_init=0.1)
+        self.out_dim = 128 * 2
+        self.register_buffer("mean", torch.tensor(self.IMNET_MEAN).view(1, 3, 1, 1))
+        self.register_buffer("std", torch.tensor(self.IMNET_STD).view(1, 3, 1, 1))
+        if freeze:
+            for q in self.stem.parameters():
+                q.requires_grad_(False)
+
+    def forward(self, img, z_lang=None):
+        if img.dtype == torch.uint8:
+            img = img.float().div_(255.0)
+        h = self.stem((img - self.mean) / self.std)
+        if self.film is not None and z_lang is not None:
+            g, b = self.film(z_lang).chunk(2, dim=-1)
+            h = h * (1 + g[:, :, None, None]) + b[:, :, None, None]
+        return self.ss(self.proj(self.tail(h)))
+
+
 class LanguageEncoder(nn.Module):
     """四种模式，对应四组对照实验：
 
@@ -163,15 +210,20 @@ class VLAPolicy(nn.Module):
     def __init__(self, vocab, horizon=8, act_dim=5, state_dim=7, lang_dim=128,
                  hidden=512, lang_mode="seq", film=True, cams=("front", "wrist"),
                  head="regress", n_bins=41, diff_steps=100, diff_infer_steps=10,
-                 ss_raw=True, last_stride=1):
+                 ss_raw=True, last_stride=1, backbone="cnn", pretrained=True,
+                 freeze_backbone=False, aux_weight=0.0):
         super().__init__()
         self.cams, self.H, self.act_dim = tuple(cams), horizon, act_dim
         self.head_type, self.n_bins = head, n_bins
         self.diff_steps, self.diff_infer_steps = diff_steps, diff_infer_steps
         self.lang = LanguageEncoder(vocab, lang_dim, mode=lang_mode)
-        self.enc = nn.ModuleDict({c: VisionEncoder(lang_dim=lang_dim, film=film,
-                                                   last_stride=last_stride, ss_raw=ss_raw)
-                                  for c in self.cams})
+        def make_enc():
+            if backbone == "resnet18":
+                return ResNetEncoder(lang_dim=lang_dim, film=film, pretrained=pretrained,
+                                     freeze=freeze_backbone)
+            return VisionEncoder(lang_dim=lang_dim, film=film,
+                                 last_stride=last_stride, ss_raw=ss_raw)
+        self.enc = nn.ModuleDict({c: make_enc() for c in self.cams})
         vis_dim = sum(self.enc[c].out_dim for c in self.cams)
         self.state_mlp = nn.Sequential(nn.Linear(state_dim, 64), nn.ReLU(), nn.Linear(64, 64))
         out_dim = {"regress": horizon * act_dim,
@@ -181,6 +233,13 @@ class VLAPolicy(nn.Module):
             nn.Linear(vis_dim + 64 + lang_dim, hidden), nn.ReLU(),
             nn.Linear(hidden, hidden), nn.ReLU(),
             nn.Linear(hidden, out_dim))
+        # 辅助监督：从视觉特征预测"目标方块/盘子在图像里的哪个像素"。
+        # 这些标签来自仿真的特权信息（策略推理时看不到），只在训练时给视觉分支一个
+        # 直接的定位信号。回答的问题是：**辅助监督能不能替代更多演示数据。**
+        # aux_weight=0 时这个头根本不创建，参数完全不变（老 checkpoint 照样能加载）。
+        self.aux_weight = aux_weight
+        if aux_weight > 0:
+            self.aux = nn.Sequential(nn.Linear(vis_dim, 256), nn.ReLU(), nn.Linear(256, 10))
         if head == "diffusion":
             self.t_mlp = nn.Sequential(nn.Linear(64, 128), nn.SiLU(), nn.Linear(128, 128))
             self.denoiser = nn.Sequential(
@@ -200,7 +259,9 @@ class VLAPolicy(nn.Module):
             kp, heat = self.enc[c](batch[c], z)
             feats.append(kp)
             heats[c] = heat
-        return torch.cat(feats + [self.state_mlp(batch["state"]), z], dim=-1), heats
+        vis = torch.cat(feats, dim=-1)
+        self._last_vis = vis
+        return torch.cat([vis, self.state_mlp(batch["state"]), z], dim=-1), heats
 
     def forward(self, batch, return_heat=False):
         """推理：返回 (B,H,5) 的动作分块。"""
@@ -290,7 +351,17 @@ class VLAPolicy(nn.Module):
             with torch.no_grad():
                 pred = ((a_noisy - (1 - ab).sqrt() * eps) / ab.sqrt()).clamp(-1, 1)
 
+        info = {"loss": loss.item()}
+        if self.aux_weight > 0 and "priv" in batch:
+            aux_pred = self.aux(self._last_vis)
+            aux_loss = F.mse_loss(aux_pred, batch["priv"])
+            loss = loss + self.aux_weight * aux_loss
+            info["aux"] = aux_loss.item()
+            with torch.no_grad():   # 目标方块在前视图里的像素误差，单位是归一化坐标
+                info["aux_uv_err"] = (aux_pred[:, :2] - batch["priv"][:, :2]).abs().mean().item()
+
         with torch.no_grad():
             l1 = ((pred - target).abs().mean(-1) * mask).sum() / denom
             grip = (((pred[..., 4] > 0) == (target[..., 4] > 0)).float() * mask).sum() / denom
-        return loss, {"loss": loss.item(), "l1": l1.item(), "grip_acc": grip.item()}
+        info.update(l1=l1.item(), grip_acc=grip.item(), total=loss.item())
+        return loss, info

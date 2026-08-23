@@ -155,6 +155,42 @@ class TabletopEnv:
             o[cam] = self.render(cam)
         return o
 
+    def world_to_pixel(self, cam, p):
+        """世界坐标 → 归一化图像坐标 [-1,1]²，外加一个"在画面内"的标志。
+
+        相机沿自己的 −z 看，+x 右、+y 上：
+            p_cam = R_camᵀ (p − t_cam);  f = (hw/2)/tan(fovy/2)
+            u = hw/2 + f·x/(−z);  v = hw/2 − f·y/(−z)
+        用 data.cam_* 而不是 model.cam_*——targetbody 模式下朝向是运行时算的。
+        """
+        cid = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_CAMERA, cam)
+        R = self.data.cam_xmat[cid].reshape(3, 3)
+        pc = R.T @ (np.asarray(p) - self.data.cam_xpos[cid])
+        hw = self.img_hw
+        f = (hw / 2) / np.tan(np.deg2rad(self.model.cam_fovy[cid]) / 2)
+        if -pc[2] < 1e-3:
+            return np.array([0.0, 0.0], np.float32), 0.0
+        u = hw / 2 + f * pc[0] / (-pc[2])
+        v = hw / 2 - f * pc[1] / (-pc[2])
+        inside = float(0 <= u < hw and 0 <= v < hw)
+        return np.array([u / hw * 2 - 1, v / hw * 2 - 1], np.float32), inside
+
+    def privileged(self):
+        """特权信息：目标方块和目标盘子在两个相机里的像素坐标（策略看不到，只用来做辅助监督）。
+
+        布局 (10,)：[前视目标方块 uv(2), 可见(1), 腕视目标方块 uv(2), 可见(1),
+                     前视目标盘子 uv(2), 可见(1), 目标方块离桌面高度(1)]
+        """
+        s = self.spec
+        c = self.cube_pos(s.target_cube)
+        pl = self.plate_pos(s.target_plate)
+        out = []
+        for cam, p in (("front", c), ("wrist", c), ("front", pl)):
+            uv, vis = self.world_to_pixel(cam, p)
+            out += [uv[0], uv[1], vis]
+        out.append(float(c[2] - TABLE_TOP))
+        return np.array(out, np.float32)
+
     # ------------------------------------------------------------- 成功判据
     def success(self):
         s = self.spec

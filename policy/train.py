@@ -40,7 +40,10 @@ def model_kwargs(cfg):
                 cams=tuple(m["cams"]), head=m.get("head", "regress"),
                 n_bins=m.get("n_bins", 41), diff_steps=m.get("diff_steps", 100),
                 diff_infer_steps=m.get("diff_infer_steps", 10),
-                ss_raw=m.get("ss_raw", True), last_stride=m.get("last_stride", 1))
+                ss_raw=m.get("ss_raw", True), last_stride=m.get("last_stride", 1),
+                backbone=m.get("backbone", "cnn"), pretrained=m.get("pretrained", True),
+                freeze_backbone=m.get("freeze_backbone", False),
+                aux_weight=m.get("aux_weight", 0.0))
 
 
 def build(cfg, eps=None):

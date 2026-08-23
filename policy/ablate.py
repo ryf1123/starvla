@@ -35,6 +35,20 @@ SUITES = {
         ("vis_relu8", ["model.ss_raw=false", "model.last_stride=2"],
          "第一版的完整写法：ReLU + 8×8"),
     ],
+    "backbone": [
+        ("bb_cnn", ["model.backbone=cnn"], "从零 4 层 CNN（1.3 M 参数）"),
+        ("bb_r18", ["model.backbone=resnet18"], "ImageNet 预训练 ResNet18，全部微调"),
+        ("bb_r18_frozen", ["model.backbone=resnet18", "model.freeze_backbone=true"],
+         "预训练 ResNet18，骨干冻结"),
+        ("bb_r18_scratch", ["model.backbone=resnet18", "model.pretrained=false"],
+         "ResNet18 结构但随机初始化——区分「结构」和「预训练权重」哪个在起作用"),
+    ],
+    "aux": [
+        ("aux_0", ["model.aux_weight=0.0"], "只用动作监督（默认）"),
+        ("aux_1", ["model.aux_weight=1.0"], "加「目标在图像哪个像素」的辅助监督"),
+        ("aux_1_small", ["model.aux_weight=1.0", "data.limit=150"], "辅助监督 + 只有 150 条数据"),
+        ("aux_0_small", ["model.aux_weight=0.0", "data.limit=150"], "无辅助监督 + 只有 150 条数据"),
+    ],
     "heads": [
         ("head_regress", ["model.head=regress"], "连续回归 + L1（ACT 路线，默认）"),
         ("head_discrete", ["model.head=discrete"], "每维 41 个格子 + 交叉熵（RT-1 路线）"),

@@ -24,7 +24,7 @@ def _worker(args):
     for k in range(n_ep):
         obs = env.reset(seed=seed0 + k)
         ex = ScriptedExpert(env, rng=rng, noise=cfg["noise"])
-        F, W, S, A = [], [], [], []
+        F, W, S, A, P = [], [], [], [], []
         done = False
         # 扰动（DAgger 思路）：在抓取前的某一步执行几个随机动作，**这些步不记录**，
         # 然后继续记录专家从这个歪掉的状态怎么纠正回来。
@@ -49,7 +49,7 @@ def _worker(args):
                     break
             a = ex.act()
             F.append(obs["front"]); W.append(obs["wrist"])
-            S.append(obs["state"]); A.append(a.astype(np.float32))
+            S.append(obs["state"]); A.append(a.astype(np.float32)); P.append(env.privileged())
             obs, r, done, info = env.step(a)
             t += 1
         if not info["success"]:
@@ -58,6 +58,7 @@ def _worker(args):
                 continue
         eps.append(dict(front=np.array(F, np.uint8), wrist=np.array(W, np.uint8),
                         state=np.array(S, np.float32), action=np.array(A, np.float32),
+                        priv=np.array(P, np.float32),
                         instruction=env.spec.instruction, success=bool(info["success"]),
                         spec=json.dumps(env.spec.to_dict(), ensure_ascii=False)))
     return wid, eps, n_fail
@@ -99,7 +100,8 @@ def main():
             continue
         np.savez_compressed(
             f"{out}/shard_{wid:02d}.npz",
-            **{f"{k}_{i}": e[k] for i, e in enumerate(eps) for k in ("front", "wrist", "state", "action")},
+            **{f"{k}_{i}": e[k] for i, e in enumerate(eps)
+               for k in ("front", "wrist", "state", "action", "priv")},
             meta=json.dumps([{ "instruction": e["instruction"], "success": e["success"],
                                "spec": e["spec"], "T": len(e["action"]) } for e in eps],
                             ensure_ascii=False))

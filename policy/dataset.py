@@ -57,9 +57,11 @@ def load_episodes(path):
         z = np.load(shard, allow_pickle=True)
         meta = json.loads(str(z["meta"]))
         for i, m in enumerate(meta):
-            eps.append(dict(front=z[f"front_{i}"], wrist=z[f"wrist_{i}"],
-                            state=z[f"state_{i}"], action=z[f"action_{i}"],
-                            instruction=m["instruction"], spec=m["spec"]))
+            e = dict(front=z[f"front_{i}"], wrist=z[f"wrist_{i}"],
+                     state=z[f"state_{i}"], action=z[f"action_{i}"],
+                     instruction=m["instruction"], spec=m["spec"])
+            e["priv"] = z[f"priv_{i}"] if f"priv_{i}" in z else None
+            eps.append(e)
     return eps
 
 
@@ -98,7 +100,9 @@ class DemoDataset(Dataset):
         idx = np.clip(np.arange(t, t + self.H), 0, T - 1)
         mask = (np.arange(t, t + self.H) < T).astype(np.float32)
         st = (e["state"][t] - self.smean) / self.sstd
+        priv = e["priv"][t] if e.get("priv") is not None else np.zeros(10, np.float32)
         return dict(front=self._img(e["front"][t]), wrist=self._img(e["wrist"][t]),
+                    priv=torch.from_numpy(priv),
                     state=torch.from_numpy(st.astype(np.float32)),
                     tokens=torch.from_numpy(self.tok[e["instruction"]]),
                     action=torch.from_numpy(e["action"][idx]),
