@@ -34,7 +34,7 @@ def instructions_for(spec):
     return out
 
 
-def run_one(runner, env, spec, instr, img_hw=192, record=True):
+def run_one(runner, env, spec, instr, img_hw=128, record=True):
     obs = env.reset(spec=spec)
     runner.reset(instr)
     frames = []
@@ -46,7 +46,7 @@ def run_one(runner, env, spec, instr, img_hw=192, record=True):
     return frames, info, classify(env), env
 
 
-def fig_swap(run, seed=321, n_instr=4, img_hw=192):
+def fig_swap(run, seed=321, n_instr=4, img_hw=128, upscale=2):
     dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model, vocab, cfg, smean, sstd = load_policy(run, dev)
     runner = Runner(model, vocab, smean, sstd, dev, k=cfg["eval"]["ensemble_k"])
@@ -60,6 +60,8 @@ def fig_swap(run, seed=321, n_instr=4, img_hw=192):
         spec2 = type(spec)(**{**spec.__dict__, "target_cube": ci, "target_plate": pi,
                               "instruction": instr})
         frames, info, outcome, _ = run_one(runner, env, spec2, instr, img_hw)
+        if upscale > 1:
+            frames = [np.repeat(np.repeat(f, upscale, 0), upscale, 1) for f in frames]
         rows.append(frames)
         labels.append(f"「{instr}」→ {outcome}")
 

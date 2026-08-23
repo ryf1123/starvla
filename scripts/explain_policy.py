@@ -96,19 +96,28 @@ def fig_keypoints(model, dev, run, cfg, n=3):
         with torch.no_grad():
             _, heats = model(b, return_heat=True)
         for i, cam in enumerate(model.cams):
-            heat = heats[cam][0].cpu().numpy()          # (128,8,8)
-            p = heat.reshape(heat.shape[0], -1)
-            p = np.exp(p - p.max(1, keepdims=True)); p /= p.sum(1, keepdims=True)
-            gy, gx = np.meshgrid(np.linspace(0, 127, 8), np.linspace(0, 127, 8), indexing="ij")
+            # heats 里已经是 softmax 之后的概率（别再 softmax 一次——我第一次就栽在这）
+            heat = heats[cam][0].cpu().numpy()          # (C, h, w)
+            C, hh, ww = heat.shape
+            p = heat.reshape(C, -1)
+            gy, gx = np.meshgrid(np.linspace(0, 127, hh), np.linspace(0, 127, ww), indexing="ij")
             xs = (p * gx.reshape(-1)).sum(1); ys = (p * gy.reshape(-1)).sum(1)
+            sharp = p.max(1)                            # 每个关键点有多确信
+            keep = np.argsort(-sharp)[:20]              # 只画最确信的 20 个，否则糊成一团
+            xs, ys, sharp = xs[keep], ys[keep], sharp[keep]
             ax = axes[i, j]
             ax.imshow(obs[cam]); ax.axis("off")
-            ax.scatter(xs, ys, s=14, c=np.arange(len(xs)), cmap="rainbow", alpha=0.75,
+            ax.scatter(xs, ys, s=10 + 260 * sharp, c=sharp, cmap="autumn", alpha=0.8,
                        edgecolors="k", linewidths=0.3)
+            # 叠加目标方块的真实像素位置：看关键点有没有真的盯着它
+            uv, vis = env.world_to_pixel(cam, env.cube_pos(env.spec.target_cube))
+            if vis:
+                gx_, gy_ = (uv + 1) / 2 * env.img_hw
+                ax.plot(gx_, gy_, "*", ms=20, mfc="#00e5ff", mec="k", mew=0.8)
             if i == 0:
                 ax.set_title(f"「{obs['instruction']}」", fontsize=8)
             ax.set_xlabel(cam)
-    fig.suptitle("空间 softmax 的 128 个关键点（颜色 = 通道编号）画回观测图\n"
+    fig.suptitle("空间 softmax 最确信的 20 个关键点（点越大越确信）；青色★是目标方块的真实位置\n"
                  "每个通道输出一个期望坐标——策略要的是「东西在哪」，这一步把它白送给网络", fontsize=10)
     save(fig, "docs/figs/policy_keypoints.png")
 
