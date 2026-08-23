@@ -34,16 +34,41 @@ mjpython scripts/view.py                   # 拖着看 Panda + 桌面
 sim/assets.py        程序化搭场景（Panda + 桌 + 方块 + 盘子 + 前视/腕部相机）
 sim/ik.py            阻尼最小二乘 IK：TCP 位姿 → 7 个关节角
 sim/tasks.py         任务采样与指令模板（TaskSpec 可序列化，能精确复现任一局）
-sim/tabletop_env.py  20 Hz 控制环、5 维末端动作、观测、成功判据
-expert/scripted.py   7 段状态机专家（用特权信息，成功率 100%）
-expert/collect.py    8 进程采演示 → data/demos/<name>/shard_*.npz
+sim/tabletop_env.py  20 Hz 控制环、5 维末端动作、观测、成功判据、世界→像素投影
+expert/scripted.py   7 段状态机专家（用特权信息，成功率 100%，抓空会重试）
+expert/collect.py    8 进程采演示；带 DAgger 式扰动，生成"歪掉之后怎么纠正"的数据
 policy/dataset.py    动作分块数据集 + 字符词表 + 平移增强
-policy/model.py      CNN + 空间 softmax + 语言 Transformer + FiLM + 分块动作头（1.3 M 参数）
-policy/train.py      训练入口（MPS）
-policy/eval.py       闭环评测 + 时间集成 + 录像
-scripts/             讲解图和视频生成脚本（explain_*.py）
+policy/model.py      视觉（从零 CNN / ResNet18）+ 空间 softmax + 语言编码 + FiLM + 三种动作头
+policy/train.py      训练入口（MPS），带视觉分支健康检查
+policy/eval.py       闭环评测 + 时间集成 + 失败归因 + 录像
+policy/ablate.py     消融套件：lang / vision / cams / chunk / heads / backbone / aux / data
+policy/generalize.py 泛化边界测试（干扰物、角落、换措辞、角色对调、更多盘子）
+policy/report.py     把所有 runs/ 汇总成一张表 + 曲线图
+scripts/             讲解图和视频生成脚本（explain_*.py、diagnose_grasp.py、view.py）
 configs/*.yaml       一个实验一份配置，命令行 --set a.b=c 覆盖
-runs/<name>/         config.yaml、log.jsonl、latest.pt
+runs/<name>/         config.yaml、log.jsonl、latest.pt、eval.json
+```
+
+## 可换的部件（一次只改一个，用闭环成功率说话）
+
+| 配置项 | 取值 | 在问什么 |
+|---|---|---|
+| `model.lang_mode` | none / bow / seq / cls | 语言到底有没有起作用 |
+| `model.film` | true / false | 语言该在视觉里生效还是最后拼接 |
+| `model.backbone` | cnn / resnet18 | 预训练视觉特征能不能替代更多数据 |
+| `model.ss_raw` | true / false | 空间 softmax 前接不接 ReLU（接了会静悄悄失灵） |
+| `model.last_stride` | 1 / 2 | 特征图 16×16 还是 8×8 |
+| `model.head` | regress / discrete / diffusion | ACT / RT-1 / Diffusion Policy 三条路线 |
+| `model.horizon` | 1 / 4 / 8 / 16 | 动作分块多长 |
+| `model.cams` | [front,wrist] / [front] / [wrist] | 腕部相机值多少 |
+| `model.aux_weight` | 0 / 1 | 辅助定位监督能不能替代更多数据 |
+| `data.limit` | 75 / 150 / 300 / 800 | 数据量曲线 |
+| `eval.ensemble_k` | 1 / 4 | 时间集成 |
+
+```bash
+python -m policy.ablate --suite lang --steps 8000 --episodes 40
+python -m policy.report --curves
+python -m policy.generalize --run runs/bc_v3
 ```
 
 ## 一分钟跑通全链路
@@ -58,9 +83,10 @@ python -m policy.eval --run runs/quick --episodes 20 --video videos/quick.mp4
 正式一轮：500 条演示 + 12000 步训练（约 19 分钟）+ 50 局闭环评测。
 
 ```bash
-python -m expert.collect --name place500 --episodes 500 --workers 8 --noise 0.05
-python -m policy.train --config configs/bc_place.yaml --name bc_v1
-python -m policy.eval --run runs/bc_v1 --episodes 50 --video videos/bc_v1.mp4
+python -m expert.collect --name place800 --episodes 800 --workers 8 --noise 0.05 --perturb-prob 0.6
+python -m policy.train --config configs/bc_place.yaml --name bc_v3 --steps 16000
+python -m policy.eval --run runs/bc_v3 --episodes 50 --video videos/bc_v3.mp4
+python -m scripts.diagnose_grasp --run runs/bc_v3    # 失败时错在哪一毫米
 ```
 
 ## 这个系统长什么样
@@ -72,7 +98,8 @@ python -m policy.eval --run runs/bc_v1 --episodes 50 --video videos/bc_v1.mp4
 | 动作分块 | 预测未来 8 步，推理时时间集成 | 抑制复合误差和抖动（ACT 的做法） |
 | 观测 | 128×128 前视 + 128×128 腕视 + 7 维本体 + 中文指令 | 腕部相机决定最后 2 cm 能不能抓住 |
 | 语言 | 字符嵌入 + 1 层 Transformer → FiLM 调制视觉 | 词袋会把「红→黄」和「黄→红」编码成同一个东西 |
-| 策略 | 1.3 M 参数 CNN | M4 上 19 分钟能训完，才谈得上做消融 |
+| 策略 | 1.3 M 参数 CNN（可换 ResNet18） | M4 上 20–40 分钟能训完，才谈得上做消融 |
+| 数据 | 800 条演示，其中 60% 带中途扰动 | 没有"歪掉之后怎么纠正"的数据，策略抓空一次就永远回不来 |
 
 ## 速度参考（M4 10 核 / 16 GB）
 
