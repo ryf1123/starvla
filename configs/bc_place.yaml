@@ -7,6 +7,8 @@ model:
   horizon: 8
   lang_mode: seq       # seq / bow / none
   film: true
+  ss_raw: true         # 空间 softmax 前不接 ReLU/归一化（false 是第一版的写法）
+  last_stride: 1       # 最后一层卷积的步长：1 → 16×16 特征图，2 → 8×8
   head: regress        # regress / discrete / diffusion
   n_bins: 41           # discrete 头每个维度的格子数
   diff_steps: 100      # diffusion 头训练用的噪声步数

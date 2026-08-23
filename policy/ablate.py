@@ -25,6 +25,16 @@ SUITES = {
         ("cam_front", ["model.cams=[front]"], "只有前视：最后 2 cm 看不清"),
         ("cam_wrist", ["model.cams=[wrist]"], "只有腕视：看不到全局，不知道盘子在哪"),
     ],
+    "vision": [
+        ("vis_raw16", ["model.ss_raw=true", "model.last_stride=1"],
+         "原始 logits + 16×16 特征图（现在的默认）"),
+        ("vis_relu16", ["model.ss_raw=false", "model.last_stride=1"],
+         "softmax 前接 GroupNorm+ReLU（第一版写法）"),
+        ("vis_raw8", ["model.ss_raw=true", "model.last_stride=2"],
+         "原始 logits，但特征图只有 8×8"),
+        ("vis_relu8", ["model.ss_raw=false", "model.last_stride=2"],
+         "第一版的完整写法：ReLU + 8×8"),
+    ],
     "heads": [
         ("head_regress", ["model.head=regress"], "连续回归 + L1（ACT 路线，默认）"),
         ("head_discrete", ["model.head=discrete"], "每维 41 个格子 + 交叉熵（RT-1 路线）"),

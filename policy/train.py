@@ -39,7 +39,8 @@ def model_kwargs(cfg):
     return dict(horizon=m["horizon"], lang_mode=m["lang_mode"], film=m["film"],
                 cams=tuple(m["cams"]), head=m.get("head", "regress"),
                 n_bins=m.get("n_bins", 41), diff_steps=m.get("diff_steps", 100),
-                diff_infer_steps=m.get("diff_infer_steps", 10))
+                diff_infer_steps=m.get("diff_infer_steps", 10),
+                ss_raw=m.get("ss_raw", True), last_stride=m.get("last_stride", 1))
 
 
 def build(cfg, eps=None):
@@ -123,6 +124,7 @@ def main():
                         if j >= 20:
                             break
                 vmean = {f"val_{k}": float(np.mean([v[k] for v in vals])) for k in vals[0]}
+                vmean.update(model.vision_diag(vb))    # 视觉分支健康检查
                 log.write(json.dumps(dict(step=step, **vmean)) + "\n"); log.flush()
                 print("  val", {k: round(v, 4) for k, v in vmean.items()})
                 torch.save(dict(model=model.state_dict(), cfg=cfg, vocab=vocab.save(),

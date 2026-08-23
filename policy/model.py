@@ -67,7 +67,8 @@ class VisionEncoder(nn.Module):
     见 notes/02-闭环失败诊断.md。
     """
 
-    def __init__(self, ch=(32, 64, 128, 128), lang_dim=128, film=True, last_stride=1):
+    def __init__(self, ch=(32, 64, 128, 128), lang_dim=128, film=True, last_stride=1,
+                 ss_raw=True, feat_hw=None):
         super().__init__()
         c0 = 3
         layers = []
@@ -76,10 +77,12 @@ class VisionEncoder(nn.Module):
             layers += [nn.Conv2d(c0, c, 3, stride=st, padding=1), nn.GroupNorm(8, c), nn.ReLU()]
             c0 = c
         self.stem = nn.Sequential(*layers[:9])      # 前 3 个 block → (B,128,16,16)
-        # 最后一个 block 只留卷积：它的原始输出直接作为空间 softmax 的 logits
-        self.tail = nn.Sequential(layers[9])        # (B,128,16,16)，无归一化无激活
+        # ss_raw=True：最后一个 block 只留卷积，原始输出直接作为空间 softmax 的 logits
+        # ss_raw=False：保留 GroupNorm + ReLU（第一版的写法，用来做对照）
+        self.tail = nn.Sequential(layers[9]) if ss_raw else nn.Sequential(*layers[9:])
         self.film = nn.Linear(lang_dim, 2 * ch[2]) if film else None
-        self.ss = SpatialSoftmax(16, 16)
+        hw = feat_hw or (16 if last_stride == 1 else 8)
+        self.ss = SpatialSoftmax(hw, hw, temp_init=0.1 if ss_raw else 1.0)
         self.out_dim = ch[-1] * 2
 
     def forward(self, img, z_lang=None):
@@ -159,13 +162,16 @@ class VLAPolicy(nn.Module):
 
     def __init__(self, vocab, horizon=8, act_dim=5, state_dim=7, lang_dim=128,
                  hidden=512, lang_mode="seq", film=True, cams=("front", "wrist"),
-                 head="regress", n_bins=41, diff_steps=100, diff_infer_steps=10):
+                 head="regress", n_bins=41, diff_steps=100, diff_infer_steps=10,
+                 ss_raw=True, last_stride=1):
         super().__init__()
         self.cams, self.H, self.act_dim = tuple(cams), horizon, act_dim
         self.head_type, self.n_bins = head, n_bins
         self.diff_steps, self.diff_infer_steps = diff_steps, diff_infer_steps
         self.lang = LanguageEncoder(vocab, lang_dim, mode=lang_mode)
-        self.enc = nn.ModuleDict({c: VisionEncoder(lang_dim=lang_dim, film=film) for c in self.cams})
+        self.enc = nn.ModuleDict({c: VisionEncoder(lang_dim=lang_dim, film=film,
+                                                   last_stride=last_stride, ss_raw=ss_raw)
+                                  for c in self.cams})
         vis_dim = sum(self.enc[c].out_dim for c in self.cams)
         self.state_mlp = nn.Sequential(nn.Linear(state_dim, 64), nn.ReLU(), nn.Linear(64, 64))
         out_dim = {"regress": horizon * act_dim,
@@ -234,6 +240,26 @@ class VLAPolicy(nn.Module):
             a0 = ((a - (1 - ab).sqrt() * eps) / ab.sqrt()).clamp(-1, 1)
             a = ab_next.sqrt() * a0 + (1 - ab_next).sqrt() * eps      # DDIM，确定性
         return a
+
+    @torch.no_grad()
+    def vision_diag(self, batch):
+        """视觉分支健康检查——这两个数就是"视觉有没有在看东西"的直接证据。
+
+        max_p    每个通道空间 softmax 的最大概率。均匀分布是 1/(H·W)=0.0039，
+                 接近这个数说明分布被压平了，关键点会永远停在图像中心（见 notes/02）。
+        kp_std   同一个关键点在一个 batch 的不同场景之间的标准差（图像归一化到 [-1,1]）。
+                 小于 0.1 基本等于"不管看到什么都输出同一个位置"。
+        """
+        z = self.lang(batch["tokens"])
+        out = {}
+        for c in self.cams:
+            kp, heat = self.enc[c](batch[c], z)
+            B, C, H, W = heat.shape
+            p = F.softmax(heat.reshape(B, C, H * W) / self.enc[c].ss.log_temp.exp().clamp(1e-3, 10.0), -1)
+            out[f"{c}_max_p"] = p.max(-1).values.median().item()
+            out[f"{c}_kp_std"] = kp.std(0).median().item()
+            out[f"{c}_temp"] = self.enc[c].ss.log_temp.exp().item()
+        return out
 
     # ------------------------------------------------------------------ 损失
     def loss(self, batch):
