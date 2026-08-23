@@ -24,21 +24,35 @@
 from __future__ import annotations
 
 import math
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
 class SpatialSoftmax(nn.Module):
-    def __init__(self, h, w):
+    """把每个通道的特征图当成"目标在哪"的概率分布，输出期望坐标。
+
+    两个必须注意的实现细节（第一版两个都踩了，导致视觉分支近乎失明）：
+
+    1. **softmax 前不能接 ReLU/归一化**。ReLU 之后特征均值只有 0.004、最大 0.99，
+       256 个位置的 softmax 几乎是均匀分布（实测每通道最大概率 0.0041，均匀是 0.0039），
+       期望坐标于是永远停在图像中心附近——不同场景之间关键点只移动约 4 个像素。
+       所以最后一层卷积的<b>原始输出</b>直接当 logits。
+    2. **温度要可学**。logits 的尺度决定分布有多尖；给一个可学的温度让网络自己决定
+       "我要多确信"。初值 0.1（比 1.0 尖 10 倍），训练中可以自己变钝。
+    """
+
+    def __init__(self, h, w, temp_init=0.1):
         super().__init__()
         ys, xs = torch.meshgrid(torch.linspace(-1, 1, h), torch.linspace(-1, 1, w), indexing="ij")
         self.register_buffer("xs", xs.reshape(-1))
         self.register_buffer("ys", ys.reshape(-1))
+        self.log_temp = nn.Parameter(torch.tensor(float(np.log(temp_init))))
 
     def forward(self, feat):                       # (B,C,H,W)
         B, C, H, W = feat.shape
-        p = F.softmax(feat.reshape(B, C, H * W), dim=-1)
+        p = F.softmax(feat.reshape(B, C, H * W) / self.log_temp.exp().clamp(1e-3, 10.0), dim=-1)
         x = (p * self.xs).sum(-1)
         y = (p * self.ys).sum(-1)
         return torch.stack([x, y], -1).reshape(B, C * 2), p.reshape(B, C, H, W)
@@ -62,7 +76,8 @@ class VisionEncoder(nn.Module):
             layers += [nn.Conv2d(c0, c, 3, stride=st, padding=1), nn.GroupNorm(8, c), nn.ReLU()]
             c0 = c
         self.stem = nn.Sequential(*layers[:9])      # 前 3 个 block → (B,128,16,16)
-        self.tail = nn.Sequential(*layers[9:])      # 第 4 个 block → (B,128,16,16)
+        # 最后一个 block 只留卷积：它的原始输出直接作为空间 softmax 的 logits
+        self.tail = nn.Sequential(layers[9])        # (B,128,16,16)，无归一化无激活
         self.film = nn.Linear(lang_dim, 2 * ch[2]) if film else None
         self.ss = SpatialSoftmax(16, 16)
         self.out_dim = ch[-1] * 2
