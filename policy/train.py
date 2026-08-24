@@ -103,6 +103,12 @@ def main():
     if args.steps:
         cfg["train"]["steps"] = args.steps
 
+    # 训练随机种子：目前所有结论都建立在单个种子上，而文献（robomimic、PhAIL）都指出
+    # 训练随机性可能是最大的方差来源。固定下来才能跑"同配置多种子"来量这一项。
+    seed = int(cfg["train"].get("seed", 0))
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+
     out = f"runs/{args.name}"
     os.makedirs(out, exist_ok=True)
     yaml.safe_dump(cfg, open(f"{out}/config.yaml", "w"), allow_unicode=True)

@@ -24,6 +24,7 @@ model:
   diff_infer_steps: 10 # 推理时 DDIM 步数
   cams: [front, wrist]
 train:
+  seed: 0              # 训练随机种子（模型初始化 + 数据打乱 + 增强）
   steps: 12000
   batch_size: 64
   lr: 3.0e-4
