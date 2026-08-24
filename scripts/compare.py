@@ -74,7 +74,9 @@ def main():
     print(f"差值 {A.mean()-B.mean():+.1%}（配对），不一致的局共 {only_a+only_b} 个")
     if a.out:
         json.dump(dict(a=a.a, b=a.b, n=n, sr_a=float(A.mean()), sr_b=float(B.mean()),
-                       both=both, neither=neither, only_a=only_a, only_b=only_b, p=p),
+                       both=both, neither=neither, only_a=only_a, only_b=only_b, p=p,
+                       per_episode_a=A.astype(int).tolist(),      # 存逐局结果，方便画配对图
+                       per_episode_b=B.astype(int).tolist()),
                   open(a.out, "w"), ensure_ascii=False, indent=2)
 
 
