@@ -21,6 +21,7 @@ def _worker(args):
     env = TabletopEnv(n_cubes=cfg["n_cubes"], n_plates=cfg["n_plates"],
                       img_hw=cfg["img_hw"], task_type=cfg["task_type"], seed=seed0,
                       same_color_prob=cfg.get("same_color_prob", 0.0),
+                      any_plate=cfg.get("any_plate", False),
                       dr=DomainRandomizer(level=cfg["dr"]) if cfg.get("dr", 0) > 0 else None)
     rng = np.random.default_rng(seed0)
     eps, n_fail = [], 0
@@ -83,6 +84,8 @@ def main():
                     help="域随机化强度（相机位姿/光照/桌面颜色/明暗），0 = 关掉")
     ap.add_argument("--same-color-prob", type=float, default=0.0,
                     help="多大比例的局有两个同色方块（指令改用「左边的/右边的」指认）")
+    ap.add_argument("--any-plate", action="store_true",
+                    help="多峰任务：指令不指定盘子，专家每局随机挑一个（见 notes/18）")
     ap.add_argument("--perturb-prob", type=float, default=0.5,
                     help="多大比例的 episode 会被中途扰动（生成恢复数据）")
     args = ap.parse_args()
@@ -90,6 +93,7 @@ def main():
     cfg = dict(noise=args.noise, img_hw=args.img_hw, n_cubes=args.n_cubes,
                n_plates=args.n_plates, task_type=args.task_type, keep_fail=args.keep_fail,
                perturb_prob=args.perturb_prob, same_color_prob=args.same_color_prob,
+               any_plate=args.any_plate,
                dr=args.dr)
     out = f"data/demos/{args.name}"
     os.makedirs(out, exist_ok=True)

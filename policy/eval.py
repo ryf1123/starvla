@@ -160,6 +160,7 @@ def evaluate(run, episodes=50, seed=1000, k=None, video=None, env_kwargs=None,
     # 评测环境要和训练时的任务分布一致：训练用了同色方块（"左边的红色方块"）时，
     # 评测也必须开着，否则是在另一个分布上测。
     kw = dict(same_color_prob=cfg["eval"].get("same_color_prob", 0.0),
+              any_plate=cfg["eval"].get("any_plate", False),   # 多峰任务（notes/18）
               img_hw=cfg["eval"].get("img_hw", 128))     # 训练用多大分辨率，评测就得渲染多大
     if cfg["eval"].get("dr", 0) > 0:
         from sim.randomize import DomainRandomizer
