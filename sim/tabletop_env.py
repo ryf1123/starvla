@@ -41,11 +41,12 @@ HOME_TCP = np.array([0.50, 0.0, TABLE_TOP + 0.22])
 class TabletopEnv:
     def __init__(self, n_cubes=3, n_plates=2, img_hw=128, max_steps=140,
                  task_type="place", seed=0, render_cams=("front", "wrist"),
-                 same_color_prob=0.0, dr=None):
+                 same_color_prob=0.0, dr=None, home_jitter=True):
         self.n_cubes, self.n_plates = n_cubes, n_plates
         self.img_hw, self.max_steps, self.task_type = img_hw, max_steps, task_type
         self.same_color_prob = same_color_prob
         self.dr = dr                                   # DomainRandomizer 或 None
+        self.home_jitter = home_jitter                 # 关掉可以复现"没有抖动"时的数据分布
         self.render_cams = render_cams
         self.model, self.layout = build_scene(["红"] * n_cubes, ["黄"] * n_plates, img_hw)
         self.data = mujoco.MjData(self.model)
@@ -93,8 +94,9 @@ class TabletopEnv:
         # 把末端摆到 home 位姿（IK 一次），夹爪张开。
         # home 位姿要抖动：不抖的话每局到达方块的步数几乎一样，
         # 策略会学成"第 10 步闭合夹爪"这个时序，而不是"到位了才闭合"这个条件。
-        tcp0 = HOME_TCP + self.rng.uniform(-1, 1, 3) * np.array([0.06, 0.08, 0.04])
-        yaw0 = float(self.rng.uniform(-0.25, 0.25))
+        j = 1.0 if self.home_jitter else 0.0
+        tcp0 = HOME_TCP + self.rng.uniform(-1, 1, 3) * np.array([0.06, 0.08, 0.04]) * j
+        yaw0 = float(self.rng.uniform(-0.25, 0.25)) * j
         q, _, _ = solve_ik(self.model, self.data, self.layout, tcp0, yaw0, HOME_QPOS, iters=60)
         self.data.qpos[self.layout["arm_qadr"]] = q
         self.data.ctrl[:7] = q
