@@ -33,4 +33,5 @@ train:
 eval:
   episodes: 50
   same_color_prob: 0.0   # 评测场景里两个方块同色的概率，必须和训练数据一致
+  img_hw: 128            # 渲染分辨率，必须和训练数据一致
   ensemble_k: 1        # 时间集成窗口。实测 k 越大越差（k=1 84% / k=8 65%），见 notes/07

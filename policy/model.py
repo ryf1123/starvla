@@ -52,9 +52,17 @@ class SpatialSoftmax(nn.Module):
 
     def forward(self, feat):                       # (B,C,H,W)
         B, C, H, W = feat.shape
+        # 坐标网格按实际特征图尺寸算：换输入分辨率（128 → 160/192）时不用改结构，
+        # 也不会破坏已有 checkpoint（buffer 还在 state_dict 里，只是用不上）。
+        if H * W == self.xs.numel():
+            xs, ys = self.xs, self.ys
+        else:
+            ys, xs = torch.meshgrid(torch.linspace(-1, 1, H, device=feat.device),
+                                    torch.linspace(-1, 1, W, device=feat.device), indexing="ij")
+            xs, ys = xs.reshape(-1), ys.reshape(-1)
         p = F.softmax(feat.reshape(B, C, H * W) / self.log_temp.exp().clamp(1e-3, 10.0), dim=-1)
-        x = (p * self.xs).sum(-1)
-        y = (p * self.ys).sum(-1)
+        x = (p * xs).sum(-1)
+        y = (p * ys).sum(-1)
         return torch.stack([x, y], -1).reshape(B, C * 2), p.reshape(B, C, H, W)
 
 

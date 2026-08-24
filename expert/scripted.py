@@ -25,7 +25,10 @@ from sim.tabletop_env import ACT_POS, ACT_YAW
 HOVER_H = 0.12
 LIFT_H = 0.16
 GRASP_DZ = 0.004          # TCP 目标相对方块中心的高度偏移
-PLACE_DZ = 0.035          # 松手时方块底面离盘面的余量
+PLACE_DZ = 0.012          # 松手时方块底面离盘面的余量。
+                          # 原来是 0.035——方块自由落体 3.5 cm，落点误差 = 水平误差 + 下落中的滚动。
+                          # 闭环里"没进盘子"是最大的失败桶（87.5% 那版里 4/5 的失败都是它），
+                          # 降到 1.2 cm 直接减小这一项。再低会有手指碰到盘沿的风险。
 
 
 def _wrap_grasp_yaw(phi):
@@ -83,12 +86,13 @@ class ScriptedExpert:
         elif self.phase == 4:
             tgt = np.array([plate[0], plate[1], TABLE_TOP + LIFT_H])
             grip = -1.0
-            if np.linalg.norm(p[:2] - plate[:2]) < 0.012:
+            if np.linalg.norm(p[:2] - plate[:2]) < 0.008:      # 对准容差收紧（原来 12 mm）
                 self.phase = 5
         elif self.phase == 5:
             tgt = np.array([plate[0], plate[1], TABLE_TOP + 0.01 + 2 * CUBE_HALF + PLACE_DZ])
             grip = -1.0
-            if abs(p[2] - tgt[2]) < 0.008:
+            # 高度到位**且**水平仍对准才松手：只看高度会在下降途中被水平漂移带偏
+            if abs(p[2] - tgt[2]) < 0.006 and np.linalg.norm(p[:2] - plate[:2]) < 0.012:
                 self.phase, self.hold = 6, 0
         else:
             tgt = np.array([plate[0], plate[1], TABLE_TOP + LIFT_H])

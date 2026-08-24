@@ -103,7 +103,8 @@ def evaluate(run, episodes=50, seed=1000, k=4, video=None, env_kwargs=None,
     model, vocab, cfg, smean, sstd = load_policy(run, device)
     # 评测环境要和训练时的任务分布一致：训练用了同色方块（"左边的红色方块"）时，
     # 评测也必须开着，否则是在另一个分布上测。
-    kw = dict(same_color_prob=cfg["eval"].get("same_color_prob", 0.0))
+    kw = dict(same_color_prob=cfg["eval"].get("same_color_prob", 0.0),
+              img_hw=cfg["eval"].get("img_hw", 128))     # 训练用多大分辨率，评测就得渲染多大
     kw.update(env_kwargs or {})
     env = TabletopEnv(seed=seed, **kw)
     runner = Runner(model, vocab, smean, sstd, device, k=k)
