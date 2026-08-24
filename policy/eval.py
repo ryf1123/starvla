@@ -37,14 +37,24 @@ def load_policy(run, device):
 class Runner:
     """维护动作队列 + 时间集成。"""
 
-    def __init__(self, model, vocab, smean, sstd, device, k=4, m=0.3, state_history=1):
+    def __init__(self, model, vocab, smean, sstd, device, k=4, m=0.3, state_history=1,
+                 stride=1):
+        """stride：每隔多少步重新规划一次。
+
+        动作分块预测了未来 H 步，但我们默认每一步都重新规划（stride=1），
+        只用最新预测的第 0 项——等于把"分块"只当成训练时的正则。
+        ACT 原版是执行完一整块再重规划（stride=H）。中间还有 stride=2/4。
+        这是**纯推理侧的开关，不用重训**，和时间集成一样应该先扫一遍再说。
+        """
         self.model, self.vocab, self.dev = model, vocab, device
         self.smean, self.sstd, self.k, self.m = smean, sstd, k, m
         self.H = model.H
         self.K = max(1, int(state_history))
+        self.stride = max(1, int(stride))
 
     def reset(self, instruction):
         self.hist_s, self.hist_a = [], []          # 多步历史观测的滚动缓冲
+        self.pending = []                          # stride>1 时，块里还没执行完的动作
         self.tok = torch.from_numpy(self.vocab.encode(instruction))[None].to(self.dev)
         if self.model.lang.mode in ("ppool", "ptok"):
             # 现编现用：这样才能测"训练里没出现过的说法"
@@ -75,7 +85,14 @@ class Runner:
              "state": torch.from_numpy(sv)[None].to(self.dev)}
         for c in self.model.cams:
             b[c] = torch.from_numpy(obs[c].transpose(2, 0, 1).copy())[None].to(self.dev)
+        if self.pending:                               # 块里还有没执行完的动作，直接用
+            a = self.pending.pop(0)
+            self.hist_a.append(a.astype(np.float32)); self.hist_a = self.hist_a[-8:]
+            return a
         pred = self.model(b)[0].cpu().numpy()          # (H,5)
+        if self.stride > 1:
+            self.pending = [np.concatenate([p[:4], [1.0 if p[4] > 0 else -1.0]])
+                            for p in pred[1:self.stride]]
         self.buf.append([pred, 0])
         self.buf = self.buf[-self.k:]
         acts, ws = [], []
@@ -114,7 +131,7 @@ def classify(env, moved_thresh=0.03):
 
 
 def evaluate(run, episodes=50, seed=1000, k=None, video=None, env_kwargs=None,
-             instruction_fn=None, device=None):
+             instruction_fn=None, device=None, stride=None):
     """k=None 时用该 run 自己 config 里的 eval.ensemble_k，别写死默认值——
     我一开始把默认值写成 4，配置改成 1 之后所有评测还在偷偷用 4。"""
     device = device or torch.device("mps" if torch.backends.mps.is_available() else "cpu")
@@ -129,7 +146,8 @@ def evaluate(run, episodes=50, seed=1000, k=None, video=None, env_kwargs=None,
     kw.update(env_kwargs or {})
     env = TabletopEnv(seed=seed, **kw)
     k = cfg["eval"].get("ensemble_k", 1) if k is None else k
-    runner = Runner(model, vocab, smean, sstd, device, k=k,
+    stride = cfg["eval"].get("stride", 1) if stride is None else stride
+    runner = Runner(model, vocab, smean, sstd, device, k=k, stride=stride,
                     state_history=cfg["model"].get("state_history", 1))
     frames, results = [], []
     for ep in range(episodes):
@@ -160,10 +178,12 @@ def main():
     ap.add_argument("--seed", type=int, default=1000)
     ap.add_argument("--ensemble", type=int, default=None,
                     help="时间集成窗口；不传就用该 run 的 config 里的 eval.ensemble_k")
+    ap.add_argument("--stride", type=int, default=None, help="每隔多少步重新规划")
     ap.add_argument("--video", default=None)
     ap.add_argument("--out", default=None, help="把逐 episode 结果写成 json")
     args = ap.parse_args()
-    sr, res = evaluate(args.run, args.episodes, args.seed, args.ensemble, args.video)
+    sr, res = evaluate(args.run, args.episodes, args.seed, args.ensemble, args.video,
+                       stride=args.stride)
     from collections import Counter
     cnt = Counter(r["outcome"] for r in res)
     print(f"成功率 {sr:.1%}  ({sum(r['success'] for r in res)}/{len(res)})  "
