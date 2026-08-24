@@ -155,7 +155,25 @@ def main():
                 verdict = "**显著更好**" if pv < 0.05 and ob > oa else (
                     "**显著更差**" if pv < 0.05 else "看不出差别")
                 L.append(f"| `{name}` | {sr:.1%} | {m} | {ob} | {oa} | {pv:.3f} | {verdict} |")
-            L += ["", "（配对检验只看不一致的局，消掉了「这一局本身好不好做」这个最大的方差来源。）", ""]
+            L += ["", "（配对检验只看不一致的局，消掉了「这一局本身好不好做」这个最大的方差来源。",
+                  "注意 `bc_v5_hist` 用的是 `place_v2` 数据，和基线 `bc_v4`(place800) 差两个变量；",
+                  "干净的单变量对照是 `bc_v5_hist` vs `bc_v5_place`，见上面的大样本表。）", ""]
+
+    # 大样本配对比较（scripts/compare.py 的输出）——比上面那张 80 局的表可信得多
+    cmps = sorted(glob.glob("runs/cmp_*.json"))
+    if cmps:
+        L += ["## 大样本配对比较（McNemar 精确检验）", "",
+              "| A | B | 局数 | A 成功率 | B 成功率 | 只有 A | 只有 B | p | 结论 |",
+              "|---|---|---|---|---|---|---|---|---|"]
+        for f in cmps:
+            d = json.load(open(f))
+            verdict = ("**A 显著更好**" if d["p"] < 0.05 and d["only_a"] > d["only_b"]
+                       else "**B 显著更好**" if d["p"] < 0.05 else "看不出差别")
+            L.append(f"| `{os.path.basename(d['a'])}` | `{os.path.basename(d['b'])}` | {d['n']} | "
+                     f"{d['sr_a']:.1%} | {d['sr_b']:.1%} | {d['only_a']} | {d['only_b']} | "
+                     f"{d['p']:.3f} | {verdict} |")
+        L += ["", "注意：上面那张 80 局的表里 p 值普遍偏大，不是因为改动无效，而是**样本量不够**。"
+              "同一个改动 n=80 时 p=0.18、n=200 时 p=0.034。", ""]
 
     for suite in ("vision", "lang", "pretrained_lang", "cams", "chunk", "heads",
                   "backbone", "aux", "data"):
