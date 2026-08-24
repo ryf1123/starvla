@@ -119,15 +119,43 @@ def main():
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     L = [f"# StarVLA 实验总结（{ts}）", ""]
 
-    if os.path.exists("runs/bc_v3/eval.json"):
-        d = json.load(open("runs/bc_v3/eval.json"))
-        from collections import Counter
+    from collections import Counter
+    if os.path.exists("runs/bc_v4/eval.json"):
+        d = json.load(open("runs/bc_v4/eval.json"))
         c = Counter(r["outcome"] for r in d["results"])
+        n = len(d["results"])
+        lo, hi = wilson(c.get("success", 0), n)
         L += ["## 基线", "",
-              f"`bc_v3`：1.33 M 参数，800 条演示，16000 步训练（约 40 分钟），"
-              f"50 局闭环 **{d['success_rate']:.0%}**"
-              f"（抓错方块 {c.get('wrong_cube',0)} / 没抓起来 {c.get('no_grasp',0)} / "
-              f"没进盘子 {c.get('off_plate',0)}）。", ""]
+              f"`bc_v4`：1.33 M 参数，800 条演示，16000 步（约 40 分钟）。"
+              f"**{n} 局闭环 {d['success_rate']:.1%}**，95% 区间 {lo:.0%}–{hi:.0%}。", "",
+              "配置：空间 softmax 保留 ReLU + 温度 1.0、特征图 16×16、关掉时间集成、每步重规划。",
+              "（前两项是把我自己改错的地方改回去，代价为零，合计 +12 个百分点。）", ""]
+
+    # 改进实验：和基线做配对 McNemar 检验（同一批种子）
+    if os.path.exists("runs/bc_v4/eval.json"):
+        base = [r["success"] for r in json.load(open("runs/bc_v4/eval.json"))["results"]]
+        rows = []
+        for d in sorted(glob.glob("runs/bc_v5_*")):
+            f = f"{d}/eval.json"
+            if not os.path.exists(f):
+                continue
+            res = json.load(open(f))["results"]
+            v = [r["success"] for r in res]
+            m = min(len(v), len(base))
+            a = np.array(base[:m], bool); b = np.array(v[:m], bool)
+            only_a = int((a & ~b).sum()); only_b = int((~a & b).sum())
+            from scripts.compare import mcnemar_exact
+            rows.append((os.path.basename(d), float(np.mean(v)), m, only_b, only_a,
+                         mcnemar_exact(only_a, only_b), Counter(r["outcome"] for r in res)))
+        if rows:
+            L += ["## 改进实验（和基线配对，同一批种子）", "",
+                  "| 实验 | 成功率 | 局数 | 只有它成功 | 只有基线成功 | McNemar p | 结论 |",
+                  "|---|---|---|---|---|---|---|"]
+            for name, sr, m, ob, oa, pv, c in rows:
+                verdict = "**显著更好**" if pv < 0.05 and ob > oa else (
+                    "**显著更差**" if pv < 0.05 else "看不出差别")
+                L.append(f"| `{name}` | {sr:.1%} | {m} | {ob} | {oa} | {pv:.3f} | {verdict} |")
+            L += ["", "（配对检验只看不一致的局，消掉了「这一局本身好不好做」这个最大的方差来源。）", ""]
 
     for suite in ("vision", "lang", "pretrained_lang", "cams", "chunk", "heads",
                   "backbone", "aux", "data"):
@@ -136,6 +164,14 @@ def main():
             continue
         L += [f"## {SUITE_TITLE.get(suite, suite)}" + ("" if done else "（进行中）"), "",
               md_table(rows), ""]
+
+    if os.path.exists("runs/ablate_stride.json"):
+        rows = json.load(open("runs/ablate_stride.json"))
+        L += ["## 动作分块的执行方式（纯推理侧开关）", "",
+              "| 重规划间隔 stride | 局数 | 成功率 | 平均步数 |", "|---|---|---|---|"]
+        for r in rows:
+            L.append(f"| {r['stride']} | {r['n']} | **{r['sr']:.0%}** | {r['steps']:.0f} |")
+        L += ["", "stride=8 就是 ACT 原版的整块开环执行。见 `notes/07`。", ""]
 
     if os.path.exists("runs/ablate_ensemble2.json"):
         rows = json.load(open("runs/ablate_ensemble2.json"))
