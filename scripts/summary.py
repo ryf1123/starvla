@@ -159,6 +159,40 @@ def main():
                   "注意 `bc_v5_hist` 用的是 `place_v2` 数据，和基线 `bc_v4`(place800) 差两个变量；",
                   "干净的单变量对照是 `bc_v5_hist` vs `bc_v5_place`，见上面的大样本表。）", ""]
 
+    # 动作表示三条路线（notes/17）+ 多峰任务（notes/18）
+    HEADS = [("回归 (ACT)", "runs/bc_v5_hist/eval.json"),
+             ("离散 argmax (RT-1)", "runs/head_discrete_h/eval.json"),
+             ("离散 期望解码", "runs/head_discrete_h/eval_expect.json"),
+             ("扩散 (DP/π0)", "runs/head_diffusion_h/eval.json")]
+    ANY = [("回归", "runs/any_regress/eval.json"), ("离散 argmax", "runs/any_discrete/eval.json"),
+           ("离散 期望解码", "runs/any_discrete/eval_expect.json"),
+           ("扩散", "runs/any_diffusion/eval.json")]
+    for title, arms, extra in (
+            ("## 动作表示三条路线（单峰任务）", HEADS,
+             "预注册的预测是「三者差别不大，都在 60–80%」——被推翻了。机制见 `notes/17`。"),
+            ("## 动作表示三条路线（多峰任务 any_plate）", ANY,
+             "指令不指定盘子，放进任意盘子都算成功；分岔点上的条件变异是单峰任务的 7 倍。"
+             "预测写在 `notes/18`。")):
+        rows = []
+        for nm, f in arms:
+            if not os.path.exists(f):
+                continue
+            res = json.load(open(f))["results"]
+            k, n = sum(r["success"] for r in res), len(res)
+            lo, hi = wilson(k, n)
+            c = Counter(r["outcome"] for r in res)
+            rows.append((nm, k / n, n, lo, hi, c))
+        if rows:
+            L += [title, "",
+                  "| 动作头 | 成功率 | 95% 区间 | 抓错 | 没碰到 | 推走了 | 掉了 | 没进盘 |",
+                  "|---|---|---|---|---|---|---|---|"]
+            for nm, sr, n, lo, hi, c in rows:
+                L.append(f"| {nm} | **{sr:.1%}** | {lo:.0%}–{hi:.0%} | "
+                         + " | ".join(str(c.get(x, 0)) for x in
+                                      ("wrong_cube", "no_grasp", "pushed", "dropped", "off_plate"))
+                         + " |")
+            L += ["", f"（n={rows[0][2]} 局。{extra}）", ""]
+
     # 大样本配对比较（scripts/compare.py 的输出）——比上面那张 80 局的表可信得多
     cmps = sorted(glob.glob("runs/cmp_*.json"))
     if cmps:
