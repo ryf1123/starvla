@@ -37,7 +37,20 @@ lark-cli wiki +node-list --as user --space-id 7497129636623663108 --parent-node-
 
 | 页 | node_token | obj_token（docx） |
 |---|---|---|
-| （建一个补一行） | | |
+| 00 环境与世界 | MNO2wpmsVip4Dykmgckc7Tahntb | GfFfd2rJbojlFVxYSkBc2a8lnjf |
+| 01 脚本专家与演示数据 | GjB6wEbYni2GMPkFdUTclzGOngd | SpHAdc2fAoQHr8xVpytcHAwVnhe |
+| 02 第一次闭环 34% 的诊断 | TcHqwDQE6iSGctkFiwYcVbldnYd | R4igdohY4oqtlbxJfr7crGTenjg |
+| 03 语言表示 | — | HrcKda6I6o4hAyxWFDbcMGpensf |
+| 04 泛化边界 | — | VJPIdcte3oB4JMxof20cEFkUnVh |
+| 05 时间集成 | — | CATXdUzEGooYhQxKEFPcvgzvnFd |
+| 06 预训练语言编码器 | — | TxRgd4YOWoHKRCxnzoEctk5Undb |
+| 07 文献调研 | — | UlDqdij33oODI2x4zS2cO0sDnzg |
+| 08 怎样做得更好 | — | Ttp0dR9CQoF3g6xVE7OcmKZenFd |
+| 09 多步历史观测 | — | LDqFdN6pRo4gxLxbsX8cTsbRnlc |
+| 10 诊断连错三次 | OV9RwLp6FicaHEkVMMuce0Rqnyh | HClMdlE5FoEEauxHoDpcGTLUnFb |
+| 11 域随机化 | — | FmEPdbyfXoMKLaxOzXCcEz77nbd |
+| 12 辅助定位监督 | — | DCwodmUceoA1EgxrhoXcLeAknma |
+| ★ 一页读懂 | — | JFoUdG4Q0oaDw3xrftLcxtJMnkj |
 
 父页顶部维护「目录」列表，每建一个子页就加一条 `<ul><li><cite type="doc" doc-id="<obj_token>"/> — 一句话说明</li></ul>`，
 用 `block_insert_after --block-id <上一个 li 的 id>` 插入。
