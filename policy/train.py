@@ -56,6 +56,11 @@ def model_kwargs(cfg):
                 aux_weight=m.get("aux_weight", 0.0), pre_dim=m.get("pre_dim", 512))
 
 
+def state_dim_of(cfg):
+    K = max(1, cfg["model"].get("state_history", 1))
+    return 7 if K == 1 else K * 12
+
+
 def build(cfg, eps=None):
     eps = eps if eps is not None else load_episodes(cfg["data"]["path"])
     limit = cfg["data"].get("limit")
@@ -73,11 +78,12 @@ def build(cfg, eps=None):
         table = TextTable([e["instruction"] for e in eps],
                           cfg["model"].get("text_model", "BAAI/bge-small-zh-v1.5"))
         print(f"预训练文本编码器：{len(table.texts)} 条不同指令 → {tuple(table.feats.shape)}")
+    K = cfg["model"].get("state_history", 1)
     tr = DemoDataset(tr_eps, vocab, cfg["model"]["horizon"], train=True,
-                     shift_aug=cfg["data"]["shift_aug"], text_table=table)
+                     shift_aug=cfg["data"]["shift_aug"], text_table=table, state_history=K)
     va = DemoDataset(val_eps, vocab, cfg["model"]["horizon"],
-                     state_stats=(tr.smean, tr.sstd), train=False, text_table=table)
-    model = VLAPolicy(vocab=len(vocab), **model_kwargs(cfg))
+                     state_stats=(tr.smean, tr.sstd), train=False, text_table=table, state_history=K)
+    model = VLAPolicy(vocab=len(vocab), state_dim=tr.state_dim, **model_kwargs(cfg))
     return tr, va, model, vocab, table
 
 

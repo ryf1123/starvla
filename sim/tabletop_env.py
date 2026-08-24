@@ -41,10 +41,11 @@ HOME_TCP = np.array([0.50, 0.0, TABLE_TOP + 0.22])
 class TabletopEnv:
     def __init__(self, n_cubes=3, n_plates=2, img_hw=128, max_steps=140,
                  task_type="place", seed=0, render_cams=("front", "wrist"),
-                 same_color_prob=0.0):
+                 same_color_prob=0.0, dr=None):
         self.n_cubes, self.n_plates = n_cubes, n_plates
         self.img_hw, self.max_steps, self.task_type = img_hw, max_steps, task_type
         self.same_color_prob = same_color_prob
+        self.dr = dr                                   # DomainRandomizer 或 None
         self.render_cams = render_cams
         self.model, self.layout = build_scene(["红"] * n_cubes, ["黄"] * n_plates, img_hw)
         self.data = mujoco.MjData(self.model)
@@ -74,6 +75,11 @@ class TabletopEnv:
             self.model.geom_rgba[self._geom_id[f"plate{i}"]] = [*COLORS[c], 1.0]
         for i, xy in enumerate(s.plate_xy):
             self.model.body_pos[self.layout["plates"][i]["bid"]] = [xy[0], xy[1], TABLE_TOP + 0.005]
+
+        # 域随机化：相机位姿、光照、桌面颜色、方块明暗。放在颜色设置**之后**，
+        # 因为方块明暗是在基准颜色上乘一个系数。
+        if self.dr is not None:
+            self.dr.apply(self.model, self.rng, self.layout)
 
         self.data.qpos[self.layout["arm_qadr"]] = HOME_QPOS
         self.data.qpos[self.layout["finger_qadr"]] = 0.04

@@ -26,8 +26,8 @@ def load_policy(run, device):
     ck = torch.load(f"{run}/latest.pt", map_location=device, weights_only=False)
     cfg = ck["cfg"]
     vocab = CharVocab.load(ck["vocab"])
-    from policy.train import model_kwargs
-    model = VLAPolicy(vocab=len(vocab), **model_kwargs(cfg))
+    from policy.train import model_kwargs, state_dim_of
+    model = VLAPolicy(vocab=len(vocab), state_dim=state_dim_of(cfg), **model_kwargs(cfg))
     model.load_state_dict(ck["model"])
     model.to(device).eval()
     smean, sstd = ck["state_stats"]
@@ -37,12 +37,14 @@ def load_policy(run, device):
 class Runner:
     """维护动作队列 + 时间集成。"""
 
-    def __init__(self, model, vocab, smean, sstd, device, k=4, m=0.3):
+    def __init__(self, model, vocab, smean, sstd, device, k=4, m=0.3, state_history=1):
         self.model, self.vocab, self.dev = model, vocab, device
         self.smean, self.sstd, self.k, self.m = smean, sstd, k, m
         self.H = model.H
+        self.K = max(1, int(state_history))
 
     def reset(self, instruction):
+        self.hist_s, self.hist_a = [], []          # 多步历史观测的滚动缓冲
         self.tok = torch.from_numpy(self.vocab.encode(instruction))[None].to(self.dev)
         if self.model.lang.mode in ("ppool", "ptok"):
             # 现编现用：这样才能测"训练里没出现过的说法"
@@ -55,10 +57,22 @@ class Runner:
 
     @torch.no_grad()
     def act(self, obs):
+        sn = (obs["state"] - self.smean) / self.sstd
+        self.hist_s.append(sn.astype(np.float32))
+        self.hist_s = self.hist_s[-self.K:]
+        while len(self.hist_s) < self.K:           # 开局不足 K 帧就用最早那帧补
+            self.hist_s.insert(0, self.hist_s[0])
+        if self.K == 1:
+            sv = self.hist_s[-1]
+        else:
+            pa = list(self.hist_a[-self.K:])
+            while len(pa) < self.K:
+                pa.insert(0, np.zeros(5, np.float32))
+            sv = np.concatenate([np.concatenate(self.hist_s), np.concatenate(pa)]).astype(np.float32)
         b = {"tokens": self.tok,
              **({"lang_feat": self.lang_feat, "lang_mask": self.lang_mask}
                 if self.model.lang.mode in ("ppool", "ptok") else {}),
-             "state": torch.from_numpy(((obs["state"] - self.smean) / self.sstd).astype(np.float32))[None].to(self.dev)}
+             "state": torch.from_numpy(sv)[None].to(self.dev)}
         for c in self.model.cams:
             b[c] = torch.from_numpy(obs[c].transpose(2, 0, 1).copy())[None].to(self.dev)
         pred = self.model(b)[0].cpu().numpy()          # (H,5)
@@ -74,6 +88,8 @@ class Runner:
         w = np.array(ws) / np.sum(ws)
         a = (np.array(acts) * w[:, None]).sum(0)
         a[4] = 1.0 if a[4] > 0 else -1.0               # 夹爪是离散的，集成后再二值化
+        self.hist_a.append(a.astype(np.float32))
+        self.hist_a = self.hist_a[-8:]
         return a
 
 
@@ -105,9 +121,13 @@ def evaluate(run, episodes=50, seed=1000, k=4, video=None, env_kwargs=None,
     # 评测也必须开着，否则是在另一个分布上测。
     kw = dict(same_color_prob=cfg["eval"].get("same_color_prob", 0.0),
               img_hw=cfg["eval"].get("img_hw", 128))     # 训练用多大分辨率，评测就得渲染多大
+    if cfg["eval"].get("dr", 0) > 0:
+        from sim.randomize import DomainRandomizer
+        kw["dr"] = DomainRandomizer(level=cfg["eval"]["dr"])
     kw.update(env_kwargs or {})
     env = TabletopEnv(seed=seed, **kw)
-    runner = Runner(model, vocab, smean, sstd, device, k=k)
+    runner = Runner(model, vocab, smean, sstd, device, k=k,
+                    state_history=cfg["model"].get("state_history", 1))
     frames, results = [], []
     for ep in range(episodes):
         obs = env.reset(seed=seed + ep)

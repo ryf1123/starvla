@@ -67,9 +67,13 @@ def load_episodes(path):
 
 class DemoDataset(Dataset):
     def __init__(self, eps, vocab, horizon=8, state_stats=None, shift_aug=4, train=True,
-                 text_table=None):
+                 text_table=None, state_history=1):
         self.eps, self.vocab, self.H = eps, vocab, horizon
         self.text_table = text_table
+        # 多步历史观测：RoboVLMs 的 600+ 组受控实验结论是
+        # "多步历史观测 + 连续动作 + 独立 policy head" 最好，而且与模型规模无关。
+        # 这里取最近 k 帧的 (本体状态, 上一步动作) 拼成一个向量——比堆图像便宜得多。
+        self.K = max(1, int(state_history))
         self.shift_aug, self.train = shift_aug, train
         self.index = [(i, t) for i, e in enumerate(eps) for t in range(len(e["action"]))]
         if state_stats is None:
@@ -95,13 +99,28 @@ class DemoDataset(Dataset):
         # 保持 uint8：CPU→GPU 的搬运量少 4 倍，转 float 和归一化放到设备上做
         return torch.from_numpy(np.ascontiguousarray(arr.transpose(2, 0, 1)))
 
+    def _state_vec(self, e, t):
+        """最近 K 帧：[s_{t-K+1..t} 归一化] + [a_{t-K..t-1}]（越界处用第 0 帧 / 零动作补）。"""
+        idx = np.clip(np.arange(t - self.K + 1, t + 1), 0, len(e["state"]) - 1)
+        s = (e["state"][idx] - self.smean) / self.sstd
+        if self.K == 1:
+            return s[0]
+        aidx = np.arange(t - self.K, t)
+        a = np.where((aidx >= 0)[:, None], e["action"][np.clip(aidx, 0, None)], 0.0)
+        return np.concatenate([s.reshape(-1), a.reshape(-1)])
+
+    @property
+    def state_dim(self):
+        # K=1 时保持 7 维（和早期 checkpoint 兼容）；K>1 时每帧是 (状态 7 + 上一步动作 5)
+        return 7 if self.K == 1 else self.K * 12
+
     def __getitem__(self, k):
         i, t = self.index[k]
         e = self.eps[i]
         T = len(e["action"])
         idx = np.clip(np.arange(t, t + self.H), 0, T - 1)
         mask = (np.arange(t, t + self.H) < T).astype(np.float32)
-        st = (e["state"][t] - self.smean) / self.sstd
+        st = self._state_vec(e, t)
         priv = e["priv"][t] if e.get("priv") is not None else np.zeros(10, np.float32)
         return dict(front=self._img(e["front"][t]), wrist=self._img(e["wrist"][t]),
                     priv=torch.from_numpy(priv),

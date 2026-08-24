@@ -43,6 +43,11 @@ def paraphrase(spec, style):
 
 def make_env(kind, seed, same_color_prob=0.0, img_hw=128):
     kw = dict(seed=seed, same_color_prob=same_color_prob, img_hw=img_hw)
+    if kind in ("camera", "light"):
+        from sim.randomize import DomainRandomizer
+        # 只随机化被测的那一项，其余保持训练时的样子——一次只改一个变量
+        kw["dr"] = DomainRandomizer(level=1.0, camera=(kind == "camera"),
+                                    lighting=(kind == "light"), table=False, cube_shade=False)
     if kind == "distract5":
         return TabletopEnv(n_cubes=5, n_plates=2, **kw)
     if kind == "plate3":
@@ -105,8 +110,9 @@ def run_case(kind, run, episodes, seed0, device, video=None):
     return out
 
 
-CASES = ["base", "distract5", "corner", "paraphrase", "terse", "swap_role", "plate3"]
-DESC = {"base": "训练分布（对照）", "distract5": "5 个方块（训练是 3 个）",
+CASES = ["base", "camera", "light", "distract5", "corner", "paraphrase", "terse", "swap_role", "plate3"]
+DESC = {"base": "训练分布（对照）", "camera": "前视相机位姿偏移（文献里最难泛化的因素）",
+        "light": "光照强度和方向改变", "distract5": "5 个方块（训练是 3 个）",
         "corner": "物体全在工作区四角", "paraphrase": "换措辞：拿起…放到…里",
         "terse": "更短的措辞：红方块到蓝盘子", "swap_role": "指令里方块/盘子颜色对调",
         "plate3": "3 个盘子（训练是 2 个）"}
