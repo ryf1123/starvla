@@ -113,8 +113,10 @@ def classify(env, moved_thresh=0.03):
     return "off_plate"
 
 
-def evaluate(run, episodes=50, seed=1000, k=4, video=None, env_kwargs=None,
+def evaluate(run, episodes=50, seed=1000, k=None, video=None, env_kwargs=None,
              instruction_fn=None, device=None):
+    """k=None 时用该 run 自己 config 里的 eval.ensemble_k，别写死默认值——
+    我一开始把默认值写成 4，配置改成 1 之后所有评测还在偷偷用 4。"""
     device = device or torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model, vocab, cfg, smean, sstd = load_policy(run, device)
     # 评测环境要和训练时的任务分布一致：训练用了同色方块（"左边的红色方块"）时，
@@ -126,6 +128,7 @@ def evaluate(run, episodes=50, seed=1000, k=4, video=None, env_kwargs=None,
         kw["dr"] = DomainRandomizer(level=cfg["eval"]["dr"])
     kw.update(env_kwargs or {})
     env = TabletopEnv(seed=seed, **kw)
+    k = cfg["eval"].get("ensemble_k", 1) if k is None else k
     runner = Runner(model, vocab, smean, sstd, device, k=k,
                     state_history=cfg["model"].get("state_history", 1))
     frames, results = [], []
@@ -155,7 +158,8 @@ def main():
     ap.add_argument("--run", required=True)
     ap.add_argument("--episodes", type=int, default=50)
     ap.add_argument("--seed", type=int, default=1000)
-    ap.add_argument("--ensemble", type=int, default=4)
+    ap.add_argument("--ensemble", type=int, default=None,
+                    help="时间集成窗口；不传就用该 run 的 config 里的 eval.ensemble_k")
     ap.add_argument("--video", default=None)
     ap.add_argument("--out", default=None, help="把逐 episode 结果写成 json")
     args = ap.parse_args()

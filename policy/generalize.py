@@ -70,7 +70,8 @@ def run_case(kind, run, episodes, seed0, device, video=None):
     model, vocab, cfg, smean, sstd = load_policy(run, device)
     env = make_env(kind, seed0, cfg["eval"].get("same_color_prob", 0.0),
                    cfg["eval"].get("img_hw", 128))
-    runner = Runner(model, vocab, smean, sstd, device, k=cfg["eval"]["ensemble_k"])
+    runner = Runner(model, vocab, smean, sstd, device, k=cfg["eval"].get("ensemble_k", 1),
+                    state_history=cfg["model"].get("state_history", 1))
     rng = np.random.default_rng(seed0)
     out, frames = [], []
     for ep in range(episodes):
