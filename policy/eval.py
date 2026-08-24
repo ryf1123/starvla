@@ -139,7 +139,9 @@ def classify(env, moved_thresh=0.03):
     from sim.assets import PLATE_R
     if getattr(env, "max_cube_h", 0.0) < 0.05:          # 从没抬起来 → 是推走的，不是搬掉的
         return "pushed"
-    d = np.linalg.norm(env.cube_pos(s.target_cube)[:2] - env.plate_pos(s.target_plate)[:2])
+    # any_plate 下"目标盘子"没有意义，用**最近的**盘子判定远近
+    idxs = range(len(s.plate_colors)) if getattr(s, "any_plate", False) else [s.target_plate]
+    d = min(np.linalg.norm(env.cube_pos(s.target_cube)[:2] - env.plate_pos(i)[:2]) for i in idxs)
     return "off_plate" if d < 2 * PLATE_R else "dropped"
 
 

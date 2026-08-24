@@ -41,10 +41,11 @@ HOME_TCP = np.array([0.50, 0.0, TABLE_TOP + 0.22])
 class TabletopEnv:
     def __init__(self, n_cubes=3, n_plates=2, img_hw=128, max_steps=140,
                  task_type="place", seed=0, render_cams=("front", "wrist"),
-                 same_color_prob=0.0, dr=None, home_jitter=True):
+                 same_color_prob=0.0, dr=None, home_jitter=True, any_plate=False):
         self.n_cubes, self.n_plates = n_cubes, n_plates
         self.img_hw, self.max_steps, self.task_type = img_hw, max_steps, task_type
         self.same_color_prob = same_color_prob
+        self.any_plate = any_plate
         self.dr = dr                                   # DomainRandomizer 或 None
         self.home_jitter = home_jitter                 # 关掉可以复现"没有抖动"时的数据分布
         self.render_cams = render_cams
@@ -65,7 +66,7 @@ class TabletopEnv:
         if seed is not None:
             self.rng = np.random.default_rng(seed)
         self.spec = spec or sample_task(self.rng, self.task_type, self.n_cubes, self.n_plates,
-                                        self.same_color_prob)
+                                        self.same_color_prob, self.any_plate)
         s = self.spec
         mujoco.mj_resetData(self.model, self.data)
 
@@ -211,8 +212,9 @@ class TabletopEnv:
         c = self.cube_pos(s.target_cube)
         if s.task_type == "lift":
             return bool(c[2] > TABLE_TOP + CUBE_HALF + 0.08)
-        p = self.plate_pos(s.target_plate)
-        in_xy = np.linalg.norm(c[:2] - p[:2]) < PLATE_R - 0.015
+        # any_plate：指令没指定盘子，进任意一个都算成功
+        idxs = range(len(s.plate_colors)) if getattr(s, "any_plate", False) else [s.target_plate]
+        in_xy = any(np.linalg.norm(c[:2] - self.plate_pos(i)[:2]) < PLATE_R - 0.015 for i in idxs)
         on_plate = abs(c[2] - (TABLE_TOP + 0.01 + CUBE_HALF)) < 0.03
         released = self.grip_width() > 0.06
         return bool(in_xy and on_plate and released)

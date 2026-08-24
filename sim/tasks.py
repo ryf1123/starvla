@@ -24,6 +24,7 @@ class TaskSpec:
     target_cube: int
     target_plate: int
     instruction: str
+    any_plate: bool = False        # True 时指令不指定盘子，放进任意盘子都算成功
 
     def to_dict(self):
         d = dataclasses.asdict(self)
@@ -62,7 +63,7 @@ def _positional_word(rng, cube_xy, idxs, tgt):
 
 
 def sample_task(rng, task_type="place", n_cubes=3, n_plates=2,
-                same_color_prob=0.0) -> TaskSpec:
+                same_color_prob=0.0, any_plate=False) -> TaskSpec:
     """采一局任务。
 
     关键设计：**盘子的颜色从方块用过的颜色里选**。
@@ -117,9 +118,15 @@ def sample_task(rng, task_type="place", n_cubes=3, n_plates=2,
     tp = int(rng.choice(cand)) if cand else int(rng.integers(len(plate_colors)))
     same = [i for i, c in enumerate(cube_colors) if c == cube_colors[tc]]
     qual = _positional_word(rng, cube_xy, same, tc) if len(same) > 1 else ""
-    if task_type == "lift":
+    if any_plate:
+        # 多峰任务：指令不说放进哪个盘子，专家**每局随机挑一个**，放进任意盘子都算成功。
+        # 关键是这个选择必须和场景无关（不能挑最近的），否则策略能从图像里推出来，
+        # 条件分布就又变回单峰了。见 notes/18。
+        tp = int(rng.integers(len(plate_colors)))
+        instr = f"把{qual}{cube_colors[tc]}色方块放进盘子"
+    elif task_type == "lift":
         instr = f"拿起{qual}{cube_colors[tc]}色方块"
     else:
         instr = f"把{qual}{cube_colors[tc]}色方块放进{plate_colors[tp]}色盘子"
     return TaskSpec(task_type, cube_colors, plate_colors, cube_xy,
-                    rng.uniform(-0.4, 0.4, n_cubes), plate_xy, tc, tp, instr)
+                    rng.uniform(-0.4, 0.4, n_cubes), plate_xy, tc, tp, instr, any_plate)
