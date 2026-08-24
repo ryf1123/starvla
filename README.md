@@ -44,6 +44,8 @@ policy/eval.py       闭环评测 + 时间集成 + 失败归因 + 录像
 policy/ablate.py     消融套件：lang / vision / cams / chunk / heads / backbone / aux / data
 policy/generalize.py 泛化边界测试（干扰物、角落、换措辞、角色对调、更多盘子）
 policy/report.py     把所有 runs/ 汇总成一张表 + 曲线图
+policy/compare.py    两个策略配对同种子 + McNemar 精确检验（scripts/compare.py）
+sim/randomize.py     域随机化：相机位姿 / 光照 / 桌面颜色（不动色相）
 scripts/             讲解图和视频生成脚本（explain_*.py、diagnose_grasp.py、view.py）
 configs/*.yaml       一个实验一份配置，命令行 --set a.b=c 覆盖
 runs/<name>/         config.yaml、log.jsonl、latest.pt、eval.json
@@ -111,6 +113,18 @@ python -m scripts.diagnose_grasp --run runs/bc_v3    # 失败时错在哪一毫�
 | 闭环推理 | 每步约 12 ms，实时 |
 
 一个踩过的坑：图像用 `float32` 送 GPU 比 `uint8` 慢 2.7 倍（带宽），归一化要放到设备上做。
+
+## 自检
+
+改完代码先跑这个（约两分钟，覆盖场景/IK/环境/域随机化/专家/模型/采集/训练/闭环）：
+
+```bash
+python -m scripts.selftest          # 全部
+python -m scripts.selftest --fast   # 跳过采集和训练，20 秒
+```
+
+写它的直接理由：它上线第一次运行就抓到一个真 bug——数据增强里裁剪尺寸写死了 128，
+会让 160×160 的实验静默地把图裁回 128，而评测喂的是完整 160，训练/评测分辨率对不上。
 
 ## 目前的结论（2026-08-24）
 
