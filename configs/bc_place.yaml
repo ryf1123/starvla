@@ -13,7 +13,8 @@ model:
   text_model: BAAI/bge-small-zh-v1.5
   pre_dim: 512
   aux_weight: 0.0      # >0 时开启"目标在图像哪个像素"的辅助监督
-  ss_raw: true         # 空间 softmax 前不接 ReLU/归一化（false 是第一版的写法）
+  ss_raw: false        # 空间 softmax 前保留 GroupNorm+ReLU、温度 1.0。
+                       # 实测这是更好的一边：16×16 下 87.5% vs 72.5%，8×8 下 75% vs 32.5%（notes/02）
   last_stride: 1       # 最后一层卷积的步长：1 → 16×16 特征图，2 → 8×8
   head: regress        # regress / discrete / diffusion
   n_bins: 41           # discrete 头每个维度的格子数
@@ -32,4 +33,4 @@ train:
 eval:
   episodes: 50
   same_color_prob: 0.0   # 评测场景里两个方块同色的概率，必须和训练数据一致
-  ensemble_k: 4        # 时间集成窗口。消融期间统一用 4 保持可比；实测 k=1 更好（83.8% vs 72.5%），见 notes/07
+  ensemble_k: 1        # 时间集成窗口。实测 k 越大越差（k=1 84% / k=8 65%），见 notes/07
