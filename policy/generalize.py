@@ -136,7 +136,7 @@ def main():
         cnt = Counter(r["outcome"] for r in res)
         sr = float(np.mean([r["success"] for r in res])) if res else float("nan")
         rows.append(dict(case=kind, desc=DESC[kind], n=len(res), sr=sr,
-                         **{k: cnt.get(k, 0) for k in ("success", "wrong_cube", "no_grasp", "off_plate", "dropped")}))
+                         **{k: cnt.get(k, 0) for k in ("success", "wrong_cube", "no_grasp", "pushed", "dropped", "off_plate")}))
         print(f"{kind:<11} {sr:6.1%}  n={len(res):<3} {dict(cnt)}", flush=True)
     out = a.out or f"{a.run}/generalize.json"
     json.dump(rows, open(out, "w"), ensure_ascii=False, indent=2)

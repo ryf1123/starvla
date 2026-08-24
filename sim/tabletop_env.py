@@ -108,6 +108,7 @@ class TabletopEnv:
         self.grip_cmd = 1.0
         self.t = 0
         self._success_hold = 0
+        self.max_cube_h = 0.0        # 目标方块这一局被抬到过的最大高度（用来区分"抓起来了"和"推着走"）
         return self.obs()
 
     # ----------------------------------------------------------------- step
@@ -130,6 +131,8 @@ class TabletopEnv:
             mujoco.mj_step(self.model, self.data)
 
         self.t += 1
+        self.max_cube_h = max(self.max_cube_h,
+                              float(self.cube_pos(self.spec.target_cube)[2] - TABLE_TOP - CUBE_HALF))
         ok = self.success()
         self._success_hold = self._success_hold + 1 if ok else 0
         done = self._success_hold >= 3 or self.t >= self.max_steps

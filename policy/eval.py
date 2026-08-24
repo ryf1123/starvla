@@ -114,13 +114,17 @@ def classify(env, moved_thresh=0.03):
     """失败归因：光看成功率不知道错在哪。
 
     wrong_cube  动了别的方块、目标方块没动 → 语言没接上
-    no_grasp    目标方块基本没动 → 定位或抓取失败
-    off_plate   方块停在盘子附近但没进去 → **放置精度**不够（差一点点）
-    dropped     方块被搬起来了却停在离盘子很远的地方 → **搬运途中掉了**
+    no_grasp    目标方块基本没动 → 完全没碰到
+    pushed      方块动了但**从没被抬起来**（最大高度 < 5 cm）→ 夹爪没对准，把方块推走了
+    dropped     抬起来过，但最后停在离盘子很远的地方 → 搬运途中掉了
+    off_plate   抬起来过、停在盘子附近但没进去 → **放置精度**不够（真正差一点点的那种）
 
-    最后两类原本合成一类 `off_plate`，实测发现这是个误导：
-    bc_v4 的 5 个"没进盘子"里**没有一个是差一点点**（全部离盘心 60–280 mm），
-    真实原因是抓不稳、半路掉了。合成一类会让人去修错的东西（见 notes/12）。
+    这套分类改过两次，两次都是因为**合并的类别掩盖了不同的病因**：
+      第一版只有 off_plate 一类 → 以为是放置精度不够，动手改了专家的松手高度；
+      第二版按"离盘子远不远"拆出 dropped → 以为是搬运途中掉了；
+      量了"方块被抬到的最大高度"才发现：那些局方块最大只离桌面 29 mm（成功局是 148 mm），
+      **根本没被抬起来过**，是被推着走的。真正的分水岭是**闭合夹爪时的对准误差**
+      （成功局中位数 11.7 mm，失败局 45.6 mm，方块半宽 22 mm）。见 notes/12。
     """
     s = env.spec
     moved = [np.linalg.norm(env.cube_pos(i)[:2] - s.cube_xy[i]) for i in range(len(s.cube_colors))]
@@ -133,6 +137,8 @@ def classify(env, moved_thresh=0.03):
     if not tgt_moved:
         return "no_grasp"
     from sim.assets import PLATE_R
+    if getattr(env, "max_cube_h", 0.0) < 0.05:          # 从没抬起来 → 是推走的，不是搬掉的
+        return "pushed"
     d = np.linalg.norm(env.cube_pos(s.target_cube)[:2] - env.plate_pos(s.target_plate)[:2])
     return "off_plate" if d < 2 * PLATE_R else "dropped"
 
