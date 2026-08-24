@@ -64,14 +64,25 @@ runs/<name>/         config.yaml、log.jsonl、latest.pt、eval.json
 | `model.horizon` | 1 / 4 / 8 / 16 | 动作分块多长 |
 | `model.cams` | [front,wrist] / [front] / [wrist] | 腕部相机值多少 |
 | `model.aux_weight` | 0 / 1 | 辅助定位监督能不能替代更多数据 |
+| `model.state_history` | 1 / 3 | 多步历史观测（目前唯一统计显著的改进） |
 | `data.limit` | 75 / 150 / 300 / 800 | 数据量曲线 |
 | `eval.ensemble_k` | 1 / 4 | 时间集成 |
+| `eval.stride` | 1 / 4 / 8 | 每步重规划还是整块开环执行 |
+| `eval.any_plate` | false / true | **多峰任务**：指令不指定盘子，放进任意一个都算成功 |
+| `--decode`（推理侧） | argmax / expect | 离散头怎么解码（不用重训） |
 
 ```bash
 python -m policy.ablate --suite lang --steps 8000 --episodes 40
 python -m policy.report --curves
 python -m policy.generalize --run runs/bc_v3
+python -m scripts.compare --a runs/A --b runs/B --episodes 200   # 配对 + McNemar
+python -m scripts.diagnose_multimodality --k 16 [--any-plate]    # 数据的条件变异下限
 ```
+
+**造完任何一个新任务/新数据版本，先跑一遍 `diagnose_multimodality`。**
+它给出"任何模型都不可能超过"的两条下限（均值式模型一条、采样式模型一条）。
+不知道下限，就分不清"模型不行"和"任务本来就没那么难/那么随机"——
+姊妹项目在这上面栽过，我们照搬了它的做法，见 [notes/18](notes/18-造一个真正多峰的任务.md)。
 
 ## 一分钟跑通全链路
 
@@ -176,6 +187,8 @@ python -m scripts.selftest --fast   # 跳过采集和训练，20 秒
 | 原始 logits + 温度 0.1（我的"修复"） | 72.5% | 32.5% |
 | ReLU 之后 + 温度 1.0（默认写法） | **87.5%** | 75.0% |
 - **任务不需要的信息，模型不会去表示**：第一版任务里颜色集合就足以定位目标，于是「有序」的语言编码器自己退化成了词袋——不是架构的错。
+- **动作表示的差距远大于预期**：同一套骨干、同一份数据，回归 **93.8%**、离散 token（argmax）**35.0%**、扩散 **3.8–5.0%**。而回归和离散的 val L1 几乎一样（0.0843 vs 0.0868）。机制量出来了：离散头 **2.6% 的步会跳变 >0.5**、夹爪每局多翻转一倍；换成对 softmax 求期望（纯推理侧开关）就回到 46.2%。见 [notes/17](notes/17-动作表示三条路线.md)。
+- **辅助监督 −62 个百分点**：用特权信息教视觉分支定位，辅助任务学到 2.4 像素误差，闭环从 86.2% 掉到 23.8%。见 [notes/15](notes/15-辅助监督反而有害.md)。
 
 完整结果见 [docs/SUMMARY.md](docs/SUMMARY.md)，踩坑过程见 `notes/`。
 
