@@ -66,10 +66,11 @@ def main():
 
     gens = [r for r in rows if r.get("gen")]
     if gens:
-        cases = list(gens[0]["gen"])
+        cases = sorted({c for r in gens for c in r["gen"]})   # 不同 run 测的项可能不一样
         print(f"\n泛化测试\n{'实验':<18}" + "".join(f"{c:>12}" for c in cases))
         for r in gens:
-            print(f"{r['name']:<18}" + "".join(f"{r['gen'][c]:>11.0%} " for c in cases))
+            print(f"{r['name']:<18}" + "".join(
+                (f"{r['gen'][c]:>11.0%} " if c in r["gen"] else f"{'—':>11} ") for c in cases))
 
     if a.curves:
         import matplotlib.pyplot as plt
