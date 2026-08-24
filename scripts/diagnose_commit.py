@@ -61,6 +61,18 @@ def rollout(run, episodes, seed, device, expert=False):
     return rows
 
 
+def stats(rows):
+    d_near = np.array([r["d_near"] for r in rows])
+    d_mid = np.array([r["d_mid"] for r in rows])
+    return dict(n=len(rows),
+                sr=float(np.mean([r["outcome"] == "success" for r in rows])),
+                committed=float((d_near < PLATE_R).mean()),
+                middled=float(((d_mid < d_near) & (d_near > PLATE_R)).mean()),
+                d_near_med=float(np.median(d_near)), d_mid_med=float(np.median(d_mid)),
+                agree_near=float(np.mean([r["chosen"] == r["near_at_start"] for r in rows])),
+                agree_left=float(np.mean([r["chosen"] == r["left_in_image"] for r in rows])))
+
+
 def report(name, rows):
     n = len(rows)
     d_near = np.array([r["d_near"] for r in rows])
@@ -81,18 +93,25 @@ def main():
                                                   "runs/any_diffusion"])
     ap.add_argument("--episodes", type=int, default=60)
     ap.add_argument("--seed", type=int, default=1000)
+    ap.add_argument("--out", default="runs/commit.json")
     a = ap.parse_args()
     dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     import os
     print("承诺 = 落点进了某个盘子；走中间 = 落点离中点比离最近的盘子还近\n")
     print(f"{'策略':<18}{'成功率':>7}{'承诺':>12}{'走中间':>12}"
           f"{'离最近盘 mm':>11}{'离中点 mm':>11}{'=更近的盘':>12}{'=画面左盘':>12}")
-    report("脚本专家", rollout(None, a.episodes, a.seed, dev, expert=True))
+    import json
+    out = {}
+    rows = rollout(None, a.episodes, a.seed, dev, expert=True)
+    report("脚本专家", rows); out["expert"] = stats(rows)
     for r in a.runs:
         if os.path.exists(f"{r}/latest.pt"):
-            report(os.path.basename(r), rollout(r, a.episodes, a.seed, dev))
+            rows = rollout(r, a.episodes, a.seed, dev)
+            report(os.path.basename(r), rows); out[os.path.basename(r)] = stats(rows)
         else:
             print(f"{os.path.basename(r):<18}{'还没训完':>7}")
+    json.dump(out, open(a.out, "w"), ensure_ascii=False, indent=2)
+    print(f"\n→ {a.out}")
 
 
 if __name__ == "__main__":

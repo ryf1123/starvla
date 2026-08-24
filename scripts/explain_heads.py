@@ -23,11 +23,12 @@ ARMS = [
     ("离散 期望解码", "runs/head_discrete_h|eval_expect.json", "同一个模型，换解码方式"),
     ("扩散 (DP/π0)", "runs/head_diffusion_h", "10 步 DDIM 去噪"),
 ]
-# 有指令的任务几乎单峰；把指令拿掉之后目标分布才是多峰的
+# 真正多峰的任务：指令不指定盘子，放进任意一个都算成功（notes/18）
 MM_ARMS = [
-    ("回归", "runs/mm_none_regress"),
-    ("离散 token", "runs/mm_none_discrete"),
-    ("扩散", "runs/mm_none_diffusion"),
+    ("回归", "runs/any_regress"),
+    ("离散\nargmax", "runs/any_discrete"),
+    ("离散\n期望", "runs/any_discrete|eval_expect.json"),
+    ("扩散", "runs/any_diffusion"),
 ]
 BUCKETS = [("success", "成功"), ("wrong_cube", "抓错方块"), ("no_grasp", "没碰到"),
            ("pushed", "推走了"), ("dropped", "掉了"), ("off_plate", "没进盘子")]
@@ -67,11 +68,11 @@ def main():
 
     fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.4))
     bars(axes[0], [a[0] for a in ARMS], res, "有指令（任务几乎单峰）")
-    bars(axes[1], [a[0] for a in MM_ARMS], mm, "没有指令（目标分布多峰）")
+    bars(axes[1], [a[0] for a in MM_ARMS], mm, "多峰任务：放进任意盘子都算成功")
     ax = axes[1]
-    ax.axhline(1 / 6, color=C["warn"], ls="--", lw=1.2)
-    ax.text(len(MM_ARMS) - 0.5, 1 / 6 + 0.02, "随机猜 ≈17%\n(1/3 方块 × 1/2 盘子)",
-            fontsize=7.5, ha="right", color=C["warn"])
+    ax.axhline(0.938, color=C["act"], ls="--", lw=1.2)
+    ax.text(len(MM_ARMS) - 0.4, 0.955, "同配置在单峰任务上 93.8%", fontsize=7.5,
+            ha="right", color=C["act"])
 
     # 失败构成
     ax = axes[2]
