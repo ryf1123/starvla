@@ -38,7 +38,7 @@ def suite_rows(suite):
         from collections import Counter
         c = Counter(r["outcome"] for r in d["results"])
         rows.append(dict(name=name, why=why, sr=d["success_rate"],
-                         **{k: c.get(k, 0) for k in ("success", "wrong_cube", "no_grasp", "off_plate")}))
+                         **{k: c.get(k, 0) for k in ("success", "wrong_cube", "no_grasp", "off_plate", "dropped")}))
     return rows, False
 
 
@@ -58,15 +58,16 @@ def wilson(k, n, z=1.96):
 
 
 def md_table(rows):
-    out = ["| 实验 | 成功率 | 95% 区间 | 抓错方块 | 没抓起来 | 没进盘子 | 在问什么 |",
-           "|---|---|---|---|---|---|---|"]
+    out = ["| 实验 | 成功率 | 95% 区间 | 抓错方块 | 没抓起来 | 半路掉了 | 没进盘子 | 在问什么 |",
+           "|---|---|---|---|---|---|---|---|"]
     best = max((r["sr"] for r in rows), default=0)
     for r in sorted(rows, key=lambda r: -r["sr"]):
         star = " ★" if r["sr"] >= best - 1e-9 else ""
-        n = r["success"] + r["wrong_cube"] + r["no_grasp"] + r["off_plate"]
+        n = sum(r.get(k, 0) for k in ("success", "wrong_cube", "no_grasp", "off_plate", "dropped"))
         lo, hi = wilson(r["success"], n)
-        out.append(f"| `{r['name']}`{star} | **{r['sr']:.0%}** | {lo:.0%}–{hi:.0%} | {r['wrong_cube']} | "
-                   f"{r['no_grasp']} | {r['off_plate']} | {r['why']} |")
+        out.append(f"| `{r['name']}`{star} | **{r['sr']:.0%}** | {lo:.0%}–{hi:.0%} | "
+                   f"{r.get('wrong_cube',0)} | {r.get('no_grasp',0)} | {r.get('dropped',0)} | "
+                   f"{r.get('off_plate',0)} | {r['why']} |")
     out.append("")
     out.append(f"（n={n} 局。95% Wilson 区间——差距小于区间宽度的结论不要当真。）")
     return "\n".join(out)
@@ -93,7 +94,7 @@ def fig_all():
         cols = [C["act"] if r["name"] == "bc_v3" else C["front"] for r in rows]
         ax.bar(x, [r["sr"] * 100 for r in rows], color=cols, alpha=0.9)
         for xi, r in zip(x, rows):
-            nn = r["success"] + r["wrong_cube"] + r["no_grasp"] + r["off_plate"]
+            nn = sum(r.get(k, 0) for k in ("success", "wrong_cube", "no_grasp", "off_plate", "dropped"))
             lo, hi = wilson(r["success"], nn)
             ax.plot([xi, xi], [lo * 100, hi * 100], color="k", lw=1.2)
             ax.text(xi, r["sr"] * 100 + 2, f"{r['sr']:.0%}", ha="center", fontsize=8)

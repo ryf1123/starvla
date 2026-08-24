@@ -34,7 +34,7 @@ def load_run(d):
     if ev:
         from collections import Counter
         c = Counter(r["outcome"] for r in ev["results"])
-        row.update({k: c.get(k, 0) for k in ("wrong_cube", "no_grasp", "off_plate")})
+        row.update({k: c.get(k, 0) for k in ("wrong_cube", "no_grasp", "off_plate", "dropped")})
         row["n_eval"] = len(ev["results"])
     if gen:
         row["gen"] = {g["case"]: g["sr"] for g in gen}
@@ -57,7 +57,8 @@ def main():
     print(hdr); print("-" * len(hdr))
     for r in rows:
         sr = f"{r['sr']:.1%}" if r["sr"] is not None else "—"
-        fail = (f"抓错{r.get('wrong_cube',0)} 没抓起{r.get('no_grasp',0)} 没进盘{r.get('off_plate',0)}"
+        fail = (f"抓错{r.get('wrong_cube',0)} 没抓起{r.get('no_grasp',0)} "
+                f"掉了{r.get('dropped',0)} 没进盘{r.get('off_plate',0)}"
                 if r["sr"] is not None else "")
         print(f"{r['name']:<18}{r['steps']:>7}{str(r['lang']):>6}{str(r['head']):>10}"
               f"{str(r['backbone']):>10}{r['cams']:>13}{str(r['H']):>3}"

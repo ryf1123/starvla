@@ -113,7 +113,7 @@ def main():
         cnt = Counter(r["outcome"] for r in res)
         rows.append(dict(name=name, why=why, sr=sr, minutes=(time.time() - t0) / 60,
                          **{k: cnt.get(k, 0) for k in
-                            ("success", "wrong_cube", "no_grasp", "off_plate")}))
+                            ("success", "wrong_cube", "no_grasp", "off_plate", "dropped")}))
         print(f"== {name}: 成功率 {sr:.1%}  {dict(cnt)}", flush=True)
 
     json.dump(rows, open(f"runs/ablate_{args.suite}.json", "w"), ensure_ascii=False, indent=2)

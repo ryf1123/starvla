@@ -111,11 +111,16 @@ class Runner:
 
 
 def classify(env, moved_thresh=0.03):
-    """失败归因：光看成功率不知道错在哪，要把失败分类。
+    """失败归因：光看成功率不知道错在哪。
 
-    wrong_cube  动了别的方块 → 语言没接上（抓错东西）
+    wrong_cube  动了别的方块、目标方块没动 → 语言没接上
     no_grasp    目标方块基本没动 → 定位或抓取失败
-    off_plate   目标方块动了但没进盘子 → 放置精度不够
+    off_plate   方块停在盘子附近但没进去 → **放置精度**不够（差一点点）
+    dropped     方块被搬起来了却停在离盘子很远的地方 → **搬运途中掉了**
+
+    最后两类原本合成一类 `off_plate`，实测发现这是个误导：
+    bc_v4 的 5 个"没进盘子"里**没有一个是差一点点**（全部离盘心 60–280 mm），
+    真实原因是抓不稳、半路掉了。合成一类会让人去修错的东西（见 notes/12）。
     """
     s = env.spec
     moved = [np.linalg.norm(env.cube_pos(i)[:2] - s.cube_xy[i]) for i in range(len(s.cube_colors))]
@@ -127,7 +132,9 @@ def classify(env, moved_thresh=0.03):
         return "wrong_cube"
     if not tgt_moved:
         return "no_grasp"
-    return "off_plate"
+    from sim.assets import PLATE_R
+    d = np.linalg.norm(env.cube_pos(s.target_cube)[:2] - env.plate_pos(s.target_plate)[:2])
+    return "off_plate" if d < 2 * PLATE_R else "dropped"
 
 
 def evaluate(run, episodes=50, seed=1000, k=None, video=None, env_kwargs=None,
@@ -161,6 +168,9 @@ def evaluate(run, episodes=50, seed=1000, k=None, video=None, env_kwargs=None,
             a = runner.act(obs)
             obs, r, done, info = env.step(a)
         results.append(dict(success=bool(info["success"]), steps=env.t, outcome=classify(env),
+                            cube_to_plate=float(np.linalg.norm(
+                                env.cube_pos(env.spec.target_cube)[:2]
+                                - env.plate_pos(env.spec.target_plate)[:2])),
                             instruction=instr, target=env.spec.target_cube,
                             target_color=env.spec.cube_colors[env.spec.target_cube]))
     sr = float(np.mean([r["success"] for r in results]))
