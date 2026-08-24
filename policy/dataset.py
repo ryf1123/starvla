@@ -105,10 +105,14 @@ class DemoDataset(Dataset):
         对图像做色相扰动等于把标签擦掉。这是一个必须踩明白的坑。
         """
         if self.train and self.shift_aug:
+            # 随机平移（等价于 random crop，robomimic 的默认增强，文献里对相机位姿泛化最有效）。
+            # 注意裁剪尺寸必须用**图像本身的尺寸**——这里原来写死了 128，
+            # 结果 160×160 的数据会被静默裁成 128，训练和评测的分辨率对不上（自检抓到的）。
+            h, w = arr.shape[:2]
             p = self.shift_aug
             arr = np.pad(arr, ((p, p), (p, p), (0, 0)), mode="edge")
             i, j = np.random.randint(0, 2 * p + 1, 2)
-            arr = arr[i:i + 128, j:j + 128]
+            arr = arr[i:i + h, j:j + w]
         # 保持 uint8：CPU→GPU 的搬运量少 4 倍，转 float 和归一化放到设备上做
         return torch.from_numpy(np.ascontiguousarray(arr.transpose(2, 0, 1)))
 
