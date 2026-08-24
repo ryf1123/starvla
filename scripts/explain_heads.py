@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json, os
+from collections import Counter
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -74,19 +75,37 @@ def main():
     ax.text(len(MM_ARMS) - 0.4, 0.955, "同配置在单峰任务上 93.8%", fontsize=7.5,
             ha="right", color=C["act"])
 
-    # 失败构成
+    # 阶段分解：多峰只发生在放置阶段，所以要把两个阶段分开看
     ax = axes[2]
-    names = [a[0] for a in ARMS]
-    bot = np.zeros(len(names))
-    for key, lab in BUCKETS[1:]:
+    PAIRS = [("回归", "runs/bc_v5_hist", "runs/any_regress"),
+             ("离散\nargmax", "runs/head_discrete_h", "runs/any_discrete"),
+             ("离散\n期望", "runs/head_discrete_h|eval_expect.json",
+              "runs/any_discrete|eval_expect.json")]
+
+    def cond_place(run):
+        res = load(run)
+        if not res:
+            return None
+        c = Counter(r["outcome"] for r in res)
+        lifted = c["success"] + c["off_plate"] + c["dropped"]
+        return (c["success"] / lifted if lifted else np.nan, lifted, len(res))
+
+    xs = np.arange(len(PAIRS))
+    w = 0.36
+    for off, key, lab, col in ((-w / 2, 1, "单峰任务", C["front"]), (w / 2, 2, "多峰任务", C["warn"])):
         vals = []
-        for r in res:
-            vals.append(sum(1 for x in r if x["outcome"] == key) / len(r) if r else 0.0)
-        ax.bar(np.arange(len(names)), vals, bottom=bot, label=lab, width=0.6)
-        bot += np.array(vals)
-    ax.set_xticks(np.arange(len(names))); ax.set_xticklabels(names, fontsize=8.5)
-    ax.set_ylabel("失败占比"); ax.legend(fontsize=7.5); ax.grid(alpha=0.3, axis="y")
-    ax.set_title("失败构成（离散化误差应该体现在放置上）", fontsize=10)
+        for row in PAIRS:
+            r = cond_place(row[key])
+            vals.append(r[0] if r else np.nan)
+        ax.bar(xs + off, vals, w, label=lab, color=col)
+        for x, v, row in zip(xs, vals, PAIRS):
+            r = cond_place(row[key])
+            if r:
+                ax.text(x + off, v + 0.02, f"{v:.0%}\n{r[1]}局", ha="center", fontsize=7)
+    ax.set_xticks(xs); ax.set_xticklabels([r[0] for r in PAIRS], fontsize=8.5)
+    ax.set_ylim(0, 1.15); ax.set_ylabel("抓起来之后放进盘子的比例")
+    ax.legend(fontsize=8); ax.grid(alpha=0.3, axis="y")
+    ax.set_title("只看放置阶段（多峰只发生在这里）\n期望解码在单峰任务上无害，在多峰任务上崩掉", fontsize=9.5)
 
     fig.suptitle("动作表示三条路线：同一套骨干，只换最后一步怎么表示动作", fontsize=11.5)
     fig.tight_layout(rect=[0, 0, 1, 0.93])
