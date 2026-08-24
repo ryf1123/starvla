@@ -6,9 +6,9 @@ cd ~/Documents/StarVLA && source .venv/bin/activate
 set -x
 python -u -m policy.train --config runs/bc_v5_hist/config.yaml --name rel_cls_hist \
   --set data.path=data/demos/place_rel eval.same_color_prob=0.5 model.lang_mode=cls --steps 16000
-python -u -m policy.eval --run runs/rel_cls_hist --episodes 80 --video videos/rel_cls_hist.mp4
+python -u -m policy.eval --run runs/rel_cls_hist --episodes 80 --out runs/rel_cls_hist/eval.json --video videos/rel_cls_hist.mp4
 python -u -m policy.train --config runs/bc_v5_hist/config.yaml --name rel_ppool_hist \
   --set data.path=data/demos/place_rel eval.same_color_prob=0.5 model.lang_mode=ppool --steps 16000
-python -u -m policy.eval --run runs/rel_ppool_hist --episodes 80 --video videos/rel_ppool_hist.mp4
+python -u -m policy.eval --run runs/rel_ppool_hist --episodes 80 --out runs/rel_ppool_hist/eval.json --video videos/rel_ppool_hist.mp4
 python -u -m policy.generalize --run runs/rel_cls_hist --episodes 40 --cases base paraphrase terse swap_role
 python -u -m policy.generalize --run runs/rel_ppool_hist --episodes 40 --cases base paraphrase terse swap_role

@@ -241,6 +241,8 @@ class VLAPolicy(nn.Module):
         super().__init__()
         self.cams, self.H, self.act_dim = tuple(cams), horizon, act_dim
         self.head_type, self.n_bins = head, n_bins
+        self.decode, self.decode_temp = "argmax", 1.0   # 离散头的解码方式（纯推理侧）
+        self.diff_fixed_noise = False                   # 扩散头是否固定初始噪声（纯推理侧）
         self.diff_steps, self.diff_infer_steps = diff_steps, diff_infer_steps
         self.lang = LanguageEncoder(vocab, lang_dim, mode=lang_mode, pre_dim=pre_dim)
         def make_enc():
@@ -298,7 +300,16 @@ class VLAPolicy(nn.Module):
             a = torch.cat([a[..., :4].tanh(), a[..., 4:]], dim=-1)
         elif self.head_type == "discrete":
             logits = self.head(h).reshape(-1, self.H, self.act_dim, self.n_bins)
-            a = self._bin_centers(logits.argmax(-1))
+            if self.decode == "expect":
+                # 对 softmax 求期望而不是取 argmax：恢复格子之间的插值能力。
+                # argmax 的问题不是分辨率（41 格的量化误差只有 0.37 mm/步），
+                # 而是**两个格子概率接近时会硬跳**——实测 2.6% 的步跳变 >0.5，
+                # 夹爪指令每局翻转 5.2 次（专家 2.0）。这是纯推理侧开关，不用重训。
+                probs = F.softmax(logits / self.decode_temp, dim=-1)
+                centers = torch.linspace(-1, 1, self.n_bins, device=logits.device)
+                a = (probs * centers).sum(-1)
+            else:
+                a = self._bin_centers(logits.argmax(-1))
         else:
             a = self._ddim_sample(self.head(h))
         return (a, heats) if return_heat else a
@@ -318,8 +329,20 @@ class VLAPolicy(nn.Module):
 
     @torch.no_grad()
     def _ddim_sample(self, cond):
+        """DDIM 去噪采样。
+
+        diff_fixed_noise=True 时每次都从**同一份初始噪声**出发。
+        原因：每步重规划（stride=1）意味着每一步都要重新采样一次，
+        而实测同一个观测重复采样出来的动作平均差 0.11——和它的总误差一样大。
+        固定初始噪声后，相邻两步的差异就只来自观测的变化，动作重新连续。
+        代价是放弃了"多峰采样"这个能力，退化成一个确定性策略。
+        """
         B = cond.shape[0]
-        a = torch.randn(B, self.H, self.act_dim, device=cond.device)
+        if self.diff_fixed_noise:
+            g = torch.Generator(device="cpu").manual_seed(0)
+            a = torch.randn(B, self.H, self.act_dim, generator=g).to(cond.device)
+        else:
+            a = torch.randn(B, self.H, self.act_dim, device=cond.device)
         steps = torch.linspace(self.diff_steps, 0, self.diff_infer_steps + 1).long().to(cond.device)
         for i in range(self.diff_infer_steps):
             t, t_next = steps[i], steps[i + 1]

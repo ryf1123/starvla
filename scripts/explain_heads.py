@@ -19,7 +19,8 @@ from scripts.summary import wilson
 
 ARMS = [
     ("回归 (ACT)", "runs/bc_v5_hist", "直接回归 8×5，L1 损失"),
-    ("离散 token (RT-1)", "runs/head_discrete_h", "每维 41 格，交叉熵"),
+    ("离散 argmax\n(RT-1)", "runs/head_discrete_h", "每维 41 格，交叉熵"),
+    ("离散 期望解码", "runs/head_discrete_h|eval_expect.json", "同一个模型，换解码方式"),
     ("扩散 (DP/π0)", "runs/head_diffusion_h", "10 步 DDIM 去噪"),
 ]
 # 有指令的任务几乎单峰；把指令拿掉之后目标分布才是多峰的
@@ -33,6 +34,9 @@ BUCKETS = [("success", "成功"), ("wrong_cube", "抓错方块"), ("no_grasp", "
 
 
 def load(run, prefer=("eval80.json", "eval.json")):
+    if "|" in run:                     # "目录|文件名"：同一个模型的另一种推理设置
+        run, f = run.split("|")
+        prefer = (f,)
     for f in prefer:
         p = f"{run}/{f}"
         if os.path.exists(p):

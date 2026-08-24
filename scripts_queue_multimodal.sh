@@ -7,5 +7,5 @@ set -x
 for H in regress discrete diffusion; do
   python -u -m policy.train --config runs/bc_v5_hist/config.yaml --name mm_none_$H \
     --set model.lang_mode=none model.head=$H --steps 16000
-  python -u -m policy.eval --run runs/mm_none_$H --episodes 80
+  python -u -m policy.eval --run runs/mm_none_$H --episodes 80 --out runs/mm_none_$H/eval.json
 done

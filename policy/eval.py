@@ -144,11 +144,17 @@ def classify(env, moved_thresh=0.03):
 
 
 def evaluate(run, episodes=50, seed=1000, k=None, video=None, env_kwargs=None,
-             instruction_fn=None, device=None, stride=None):
+             instruction_fn=None, device=None, stride=None, decode=None, decode_temp=1.0,
+             fixed_noise=False, infer_steps=None):
     """k=None 时用该 run 自己 config 里的 eval.ensemble_k，别写死默认值——
     我一开始把默认值写成 4，配置改成 1 之后所有评测还在偷偷用 4。"""
     device = device or torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model, vocab, cfg, smean, sstd = load_policy(run, device)
+    if decode is not None:
+        model.decode, model.decode_temp = decode, decode_temp
+    model.diff_fixed_noise = bool(fixed_noise)
+    if infer_steps is not None:
+        model.diff_infer_steps = int(infer_steps)
     # 评测环境要和训练时的任务分布一致：训练用了同色方块（"左边的红色方块"）时，
     # 评测也必须开着，否则是在另一个分布上测。
     kw = dict(same_color_prob=cfg["eval"].get("same_color_prob", 0.0),
@@ -195,11 +201,18 @@ def main():
     ap.add_argument("--ensemble", type=int, default=None,
                     help="时间集成窗口；不传就用该 run 的 config 里的 eval.ensemble_k")
     ap.add_argument("--stride", type=int, default=None, help="每隔多少步重新规划")
+    ap.add_argument("--decode", default=None, choices=["argmax", "expect"],
+                    help="离散头的解码方式：argmax 或对 softmax 求期望（纯推理侧开关）")
+    ap.add_argument("--decode-temp", type=float, default=1.0)
+    ap.add_argument("--fixed-noise", action="store_true",
+                    help="扩散头：每步从同一份初始噪声出发（纯推理侧开关）")
+    ap.add_argument("--infer-steps", type=int, default=None, help="扩散头推理的 DDIM 步数")
     ap.add_argument("--video", default=None)
     ap.add_argument("--out", default=None, help="把逐 episode 结果写成 json")
     args = ap.parse_args()
     sr, res = evaluate(args.run, args.episodes, args.seed, args.ensemble, args.video,
-                       stride=args.stride)
+                       stride=args.stride, decode=args.decode, decode_temp=args.decode_temp,
+                       fixed_noise=args.fixed_noise, infer_steps=args.infer_steps)
     from collections import Counter
     cnt = Counter(r["outcome"] for r in res)
     print(f"成功率 {sr:.1%}  ({sum(r['success'] for r in res)}/{len(res)})  "
