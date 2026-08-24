@@ -2,6 +2,7 @@ data:
   path: data/demos/place800
   val_frac: 0.1
   shift_aug: 4
+  grasp_oversample: 1  # >1 时把夹爪开合前后 ±3 步的样本多放几份
   limit: null          # 只用前 N 条演示（数据量曲线用）
 model:
   horizon: 8

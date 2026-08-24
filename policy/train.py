@@ -80,7 +80,8 @@ def build(cfg, eps=None):
         print(f"预训练文本编码器：{len(table.texts)} 条不同指令 → {tuple(table.feats.shape)}")
     K = cfg["model"].get("state_history", 1)
     tr = DemoDataset(tr_eps, vocab, cfg["model"]["horizon"], train=True,
-                     shift_aug=cfg["data"]["shift_aug"], text_table=table, state_history=K)
+                     shift_aug=cfg["data"]["shift_aug"], text_table=table, state_history=K,
+                     grasp_oversample=cfg["data"].get("grasp_oversample", 1))
     va = DemoDataset(val_eps, vocab, cfg["model"]["horizon"],
                      state_stats=(tr.smean, tr.sstd), train=False, text_table=table, state_history=K)
     model = VLAPolicy(vocab=len(vocab), state_dim=tr.state_dim, **model_kwargs(cfg))

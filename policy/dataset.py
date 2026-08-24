@@ -66,8 +66,9 @@ def load_episodes(path):
 
 
 class DemoDataset(Dataset):
+    """演示数据集。`grasp_oversample>1` 时会把夹爪开合前后的样本多放几份。"""
     def __init__(self, eps, vocab, horizon=8, state_stats=None, shift_aug=4, train=True,
-                 text_table=None, state_history=1):
+                 text_table=None, state_history=1, grasp_oversample=1):
         self.eps, self.vocab, self.H = eps, vocab, horizon
         self.text_table = text_table
         # 多步历史观测：RoboVLMs 的 600+ 组受控实验结论是
@@ -76,6 +77,18 @@ class DemoDataset(Dataset):
         self.K = max(1, int(state_history))
         self.shift_aug, self.train = shift_aug, train
         self.index = [(i, t) for i, e in enumerate(eps) for t in range(len(e["action"]))]
+        # 抓取时刻过采样：失败归因显示成败几乎全取决于**闭合夹爪那一刻对没对准**
+        # （成功局水平误差中位数 11.7 mm，失败局 45.6 mm，方块半宽 22 mm，见 notes/12）。
+        # 把夹爪状态翻转前后 ±3 步的样本多放几份，等于给这几步更大的权重。
+        if grasp_oversample > 1:
+            extra = []
+            for i, e in enumerate(eps):
+                g = e["action"][:, 4]
+                flips = np.nonzero(np.diff(np.sign(g)))[0]
+                for f in flips:
+                    for t in range(max(0, f - 3), min(len(g), f + 4)):
+                        extra += [(i, t)] * (grasp_oversample - 1)
+            self.index += extra
         if state_stats is None:
             S = np.concatenate([e["state"] for e in eps])
             state_stats = (S.mean(0), S.std(0) + 1e-6)
