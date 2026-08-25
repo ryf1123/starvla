@@ -133,6 +133,48 @@ def t_train_eval():
     return "训练 8 步 + 闭环 2 局"
 
 
+def t_any_plate():
+    """多峰任务（notes/18）：指令不指定盘子、专家的选择必须和场景无关、进任意盘子都算成功。"""
+    import numpy as np
+    from sim.tasks import sample_task
+    from sim.tabletop_env import TabletopEnv
+    from expert.scripted import ScriptedExpert
+    rng = np.random.default_rng(0)
+    specs = [sample_task(rng, "place", 3, 2, 0.0, True) for _ in range(300)]
+    assert all("盘子" in sp.instruction and "色盘子" not in sp.instruction for sp in specs), \
+        "any_plate 的指令不应该指定盘子颜色"
+    near = np.mean([sp.target_plate == int(np.argmin(
+        [np.linalg.norm(sp.cube_xy[sp.target_cube] - q) for q in sp.plate_xy])) for sp in specs])
+    assert 0.35 < near < 0.65, f"专家的盘子选择和场景相关（选更近的占 {near:.0%}），多峰性会被策略猜出来"
+    env = TabletopEnv(seed=0, any_plate=True)
+    ok = 0
+    for ep in range(4):
+        obs = env.reset(seed=ep)
+        ex = ScriptedExpert(env, rng=np.random.default_rng(ep))
+        done = False
+        while not done:
+            obs, r, done, info = env.step(ex.act())
+        ok += info["success"]
+    assert ok == 4, f"多峰任务上专家只成功 {ok}/4"
+    return f"指令不含盘子颜色，选更近的盘占 {near:.0%}（要 ≈50%），专家 4/4"
+
+
+def t_decode():
+    """离散头的两种解码方式都能跑，且给出不同的动作（notes/17 的纯推理侧开关）。"""
+    import torch
+    from policy.model import VLAPolicy
+    m = VLAPolicy(vocab=13, head="discrete").eval()
+    b = dict(front=torch.randint(0, 255, (2, 3, 128, 128), dtype=torch.uint8),
+             wrist=torch.randint(0, 255, (2, 3, 128, 128), dtype=torch.uint8),
+             state=torch.randn(2, 7), tokens=torch.randint(1, 13, (2, 20)))
+    with torch.no_grad():
+        m.decode = "argmax"; a1 = m(b)
+        m.decode = "expect"; a2 = m(b)
+    assert a1.shape == a2.shape
+    assert (a1 - a2).abs().max() > 1e-4, "两种解码给出了完全相同的动作，开关没接上"
+    return f"argmax 与期望解码的动作平均差 {(a1-a2).abs().mean():.4f}"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fast", action="store_true")
@@ -145,6 +187,8 @@ def main():
     check("脚本专家", t_expert)
     check("模型前向/损失", t_model)
     check("输入分辨率自适应", t_resolution)
+    check("多峰任务 any_plate", t_any_plate)
+    check("离散头的两种解码", t_decode)
     if not a.fast:
         check("数据采集", lambda: t_collect(None))
         check("训练 + 闭环评测", t_train_eval)
