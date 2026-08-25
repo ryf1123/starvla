@@ -2,7 +2,7 @@
 
     mjpython scripts/view.py                      # 静态看场景，可拖拽
     mjpython scripts/view.py --expert             # 脚本专家实时跑
-    mjpython scripts/view.py --run runs/bc_v2     # 策略实时跑
+    mjpython scripts/view.py --run runs/bc_v5_hist     # 策略实时跑
 关窗口即退出。
 """
 from __future__ import annotations

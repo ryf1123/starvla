@@ -3,7 +3,7 @@
 对照着读 sim/tabletop_env.py、policy/dataset.py、policy/model.py。
 有训好的策略就传 --run，没有就只走到"数据长什么样"。
 
-    python -m scripts.walkthrough --run runs/bc_v1
+    python -m scripts.walkthrough --run runs/bc_v5_hist
 """
 from __future__ import annotations
 

@@ -6,7 +6,7 @@
     policy_lang.png       语言编码：有序 Transformer vs 字符词袋的相似度矩阵
     policy_chunk.png      预测的动作分块 vs 专家动作；时间集成前后的动作曲线
 
-    python -m scripts.explain_policy --run runs/bc_v1
+    python -m scripts.explain_policy --run runs/bc_v5_hist
 """
 from __future__ import annotations
 
@@ -21,6 +21,18 @@ from policy.eval import load_policy, Runner
 from policy.dataset import load_episodes, DemoDataset, CharVocab
 from sim.tabletop_env import TabletopEnv
 from expert.scripted import ScriptedExpert
+
+
+def _state(model, obs, smean, sstd, dev):
+    """本体状态向量。model.state_history>1 时输入是最近 k 帧的 (状态, 上一步动作) 拼起来；
+    做静态讲解图时没有历史，就用当前帧重复 k 次、上一步动作填 0。"""
+    x = ((obs["state"] - smean) / sstd).astype(np.float32)
+    need = model.state_mlp[0].in_features
+    if need == x.shape[0]:
+        return torch.from_numpy(x)[None].to(dev)
+    k = need // (x.shape[0] + model.act_dim)
+    one = np.concatenate([x, np.zeros(model.act_dim, np.float32)])
+    return torch.from_numpy(np.tile(one, k))[None].to(dev)
 
 
 def fig_arch(model, cfg):
@@ -90,7 +102,7 @@ def fig_keypoints(model, dev, run, cfg, n=3):
         for _ in range(6):                       # 走到接近抓取的时刻
             obs, *_ = env.step(ex.act())
         b = {"tokens": torch.from_numpy(vocab.encode(obs["instruction"]))[None].to(dev),
-             "state": torch.from_numpy(((obs["state"] - smean) / sstd).astype(np.float32))[None].to(dev)}
+             "state": _state(model, obs, smean, sstd, dev)}
         for c in model.cams:
             b[c] = torch.from_numpy(obs[c].transpose(2, 0, 1).copy())[None].to(dev)
         with torch.no_grad():
@@ -162,13 +174,15 @@ def fig_chunk(model, dev, run, cfg):
     env = TabletopEnv(seed=77, img_hw=128)
     obs = env.reset(seed=77)
     ex = ScriptedExpert(env, rng=np.random.default_rng(0))
-    runner = Runner(model, vocab, smean, sstd, dev, k=cfg["eval"]["ensemble_k"])
+    runner = Runner(model, vocab, smean, sstd, dev, k=cfg["eval"]["ensemble_k"],
+                    stride=cfg["eval"].get("stride", 1),
+                    state_history=cfg["model"].get("state_history", 1))
     runner.reset(obs["instruction"])
     raw, ens, exp, chunks = [], [], [], []
     for t in range(26):
         a_exp = ex.act()
         b = {"tokens": runner.tok,
-             "state": torch.from_numpy(((obs["state"] - smean) / sstd).astype(np.float32))[None].to(dev)}
+             "state": _state(model, obs, smean, sstd, dev)}
         for c in model.cams:
             b[c] = torch.from_numpy(obs[c].transpose(2, 0, 1).copy())[None].to(dev)
         with torch.no_grad():
@@ -204,7 +218,7 @@ def fig_chunk(model, dev, run, cfg):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run", default="runs/bc_v1")
+    ap.add_argument("--run", default="runs/bc_v5_hist")
     a = ap.parse_args()
     dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model, vocab, cfg, smean, sstd = load_policy(a.run, dev)

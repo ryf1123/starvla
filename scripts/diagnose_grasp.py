@@ -55,7 +55,7 @@ def summarize(logs):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run", default="runs/bc_v2")
+    ap.add_argument("--run", default="runs/bc_v5_hist")
     ap.add_argument("--episodes", type=int, default=20)
     ap.add_argument("--seed", type=int, default=1000)
     a = ap.parse_args()
