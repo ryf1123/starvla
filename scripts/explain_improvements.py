@@ -80,7 +80,7 @@ def main():
         sig = "显著" if r["p"] < 0.05 else "不显著"
         txt = (f"{r['d']*100:+.1f} 个百分点   p={r['p']:.3f} {sig}   "
                f"({r['sr']:.0%} vs {r['base']:.0%}, n={r['n']})")
-        if r["d"] * 100 < -20:                      # 长的负向柱：字写在柱子里面，靠右对齐
+        if r["d"] * 100 < -40:                      # 长的负向柱：字写在柱子里面，靠右对齐
             ax.text(-2, yi, txt, va="center", ha="right", fontsize=8.6, color="white")
         else:
             ax.text(r["d"] * 100 + (1.5 if r["d"] >= 0 else -1.5), yi, txt, va="center",
