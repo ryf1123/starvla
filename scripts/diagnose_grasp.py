@@ -62,7 +62,9 @@ def main():
     dev = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
     model, vocab, cfg, sm, ss = load_policy(a.run, dev)
     env = TabletopEnv(seed=a.seed)
-    runner = Runner(model, vocab, sm, ss, dev, k=cfg["eval"]["ensemble_k"])
+    runner = Runner(model, vocab, sm, ss, dev, k=cfg["eval"]["ensemble_k"],
+                    stride=cfg["eval"].get("stride", 1),
+                    state_history=cfg["model"].get("state_history", 1))
 
     pol = [trace(runner, env, a.seed + i) for i in range(a.episodes)]
     exp = [trace(None, env, a.seed + i, is_expert=True) for i in range(a.episodes)]
