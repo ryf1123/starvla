@@ -122,10 +122,21 @@ def main():
     dl = DataLoader(tr, batch_size=bs, shuffle=True, num_workers=cfg["train"]["workers"],
                     drop_last=True, persistent_workers=cfg["train"]["workers"] > 0)
     vdl = DataLoader(va, batch_size=bs, shuffle=False, num_workers=0)
-    opt = torch.optim.AdamW(model.parameters(), lr=cfg["train"]["lr"],
-                            weight_decay=cfg["train"]["wd"])
+    # 预训练骨干要用更小的学习率：和头部同一个 lr 会在前几千步把预训练特征直接冲掉，
+    # "预训练"就退化成一个初始化。标准做法是骨干取头部的 1/10（notes/22）。
+    lr = cfg["train"]["lr"]
+    bb_mult = float(cfg["train"].get("backbone_lr_mult", 1.0))
+    if bb_mult != 1.0:
+        bb, rest = [], []
+        for n, q in model.named_parameters():
+            (bb if n.startswith("enc.") else rest).append(q)
+        groups = [dict(params=bb, lr=lr * bb_mult), dict(params=rest, lr=lr)]
+        max_lrs = [lr * bb_mult, lr]
+    else:
+        groups, max_lrs = [dict(params=list(model.parameters()), lr=lr)], [lr]
+    opt = torch.optim.AdamW(groups, lr=lr, weight_decay=cfg["train"]["wd"])
     total = cfg["train"]["steps"]
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, cfg["train"]["lr"], total_steps=total,
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lrs, total_steps=total,
                                                 pct_start=0.05)
     log = open(f"{out}/log.jsonl", "a")
     step, t0 = 0, time.time()
