@@ -23,6 +23,10 @@ ITEMS = [
     ("抓取时刻过采样", "runs/bc_v5_grasp", "runs/bc_v5_place", "夹爪开合前后样本 ×3"),
     ("160×160 分辨率", "runs/bc_v5_res160", "runs/bc_v5_place", "观测 128→160"),
     ("辅助定位监督", "runs/bc_v5_aux", "runs/bc_v5_place", "预测目标像素坐标，weight=1.0"),
+    ("离散 token 动作头", "runs/head_discrete_h", "runs/bc_v5_hist", "每维 41 格 + 交叉熵"),
+    ("扩散动作头", "runs/head_diffusion_h", "runs/bc_v5_hist", "10 步 DDIM 去噪"),
+    ("预训练 ResNet18 骨干", "runs/bb_r18", "runs/bc_v5_hist", "ImageNet 权重，同一套学习率"),
+    ("数据 ×3（36 条指令）", "runs/rel_cls_big", "runs/rel_cls_hist", "900 → 2700 条演示"),
     # 域随机化不放进这张图：它的 eval 是在**随机化分布**上跑的，和基线的固定场景
     # 不是同一个测试集，放进来会是苹果比橘子。它的结果单独在 notes/13 里讲。
 ]
@@ -76,9 +80,8 @@ def main():
         sig = "显著" if r["p"] < 0.05 else "不显著"
         txt = (f"{r['d']*100:+.1f} 个百分点   p={r['p']:.3f} {sig}   "
                f"({r['sr']:.0%} vs {r['base']:.0%}, n={r['n']})")
-        if r["d"] * 100 < -20:                      # 长的负向柱：字写在柱子里面
-            ax.text(r["d"] * 100 + 2, yi, txt, va="center", ha="left",
-                    fontsize=8.6, color="white")
+        if r["d"] * 100 < -20:                      # 长的负向柱：字写在柱子里面，靠右对齐
+            ax.text(-2, yi, txt, va="center", ha="right", fontsize=8.6, color="white")
         else:
             ax.text(r["d"] * 100 + (1.5 if r["d"] >= 0 else -1.5), yi, txt, va="center",
                     ha="left" if r["d"] >= 0 else "right", fontsize=8.6, color=col)
@@ -86,11 +89,13 @@ def main():
     ax.set_yticks(y)
     ax.set_yticklabels([f"{r['name']}\n{r['why']}" for r in rows], fontsize=9)
     ax.set_xlabel("相对各自对照组的成功率变化（百分点，配对）")
-    ax.set_xlim(-78, 52)
+    ax.set_xlim(-95, 62)
     ax.grid(axis="x", alpha=0.3)
-    ax.set_title("所有改进尝试：只有一个是统计显著的正收益\n"
-                 "每条都用同一批评测种子做配对 McNemar 检验——没有 p 值的柱状图在这个样本量下没有信息量",
-                 fontsize=11)
+    npos = sum(1 for r in rows if r["p"] < 0.05 and r["d"] > 0)
+    nneg = sum(1 for r in rows if r["p"] < 0.05 and r["d"] < 0)
+    ax.set_title(f"{len(rows)} 条改进尝试：{npos} 条是统计显著的正收益，{nneg} 条显著有害\n"
+                 "每条都用同一批评测种子做配对 McNemar 检验——"
+                 "没有 p 值的柱状图在这个样本量下没有信息量", fontsize=11)
     fig.tight_layout()
     save(fig, "docs/figs/improvements.png")
     for r in rows:
