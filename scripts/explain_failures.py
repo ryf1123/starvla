@@ -16,8 +16,11 @@ from scripts._style import save, C
 from policy.eval import load_policy, Runner, classify
 from sim.tabletop_env import TabletopEnv
 
+# 归因分类改过三次（见 notes/12），这张表要跟着改，否则新类别会直接 KeyError
 KIND_CN = {"wrong_cube": "抓错方块（语言没接上）",
-           "no_grasp": "没抓起来（定位/抓取失败）",
+           "no_grasp": "没碰到（完全没够到）",
+           "pushed": "推走了（夹爪没对准）",
+           "dropped": "掉了（搬运途中）",
            "off_plate": "没进盘子（放置精度不够）",
            "success": "成功"}
 
@@ -82,7 +85,7 @@ def main():
             ax = axes[i, j]
             ax.imshow(e["frames"][min(t, T - 1)]); ax.axis("off")
             if j == 0:
-                ax.set_title(f"{KIND_CN[e['outcome']]}\n「{e['instr']}」 {T} 步",
+                ax.set_title(f"{KIND_CN.get(e['outcome'], e['outcome'])}\n「{e['instr']}」 {T} 步",
                              fontsize=8, loc="left", color=C["warn"])
             else:
                 ax.set_title(f"t={t}  离目标 {e['d'][min(t, T-1)]:.0f} mm", fontsize=7.5)
@@ -91,7 +94,7 @@ def main():
 
     from scripts.video_grid import grid
     grid([e["frames"] for e in eps],
-         [f"{KIND_CN[e['outcome']].split('（')[0]}：{e['instr']}" for e in eps],
+         [f"{KIND_CN.get(e['outcome'], e['outcome']).split('（')[0]}：{e['instr']}" for e in eps],
          "videos/failures.mp4", fps=12, cols=min(3, len(eps)))
 
 
